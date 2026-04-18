@@ -1,4 +1,6 @@
 # Frequency_Analysis.py
+import sys
+
 import numpy as np
 import pandas as pd
 import re
@@ -15,7 +17,6 @@ import matplotlib.pyplot as plt
 from openpyxl.styles import Alignment
 import matplotlib
 import matplotlib.patches as mpatches
-matplotlib.use('Qt5Agg')  # 确保使用Qt5后端
 
 from app_utils import show_error, resource_path, freq_band_data_extract
 from sparam_core import parse_port_input

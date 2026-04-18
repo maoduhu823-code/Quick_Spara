@@ -32,43 +32,69 @@ Key dependencies: `PyQt6`, `scikit-rf` (`skrf`), `numpy`, `scipy`, `matplotlib`,
 
 ## Architecture
 
-### Entry Point
-`Quick_Sparam_B.py` — sets matplotlib font/backend globals for Windows/Linux, creates the `QApplication`, instantiates `SParameterViewer_MainWin`, and calls `check_beta_period()` before entering the event loop.
+### File Structure
 
-### Main Window
-`Quick_Sparam_mainUI.py` — defines `SParameterViewer_MainWin(QWidget)`, the entire application window. It owns:
-- `self.s_data`: dict mapping filename → `skrf.Network` objects
-- `self.s_param / y_param / z_param`: dicts of computed parameter matrices
-- Left panel: file operations (open/save/delete), port operations (reduction, reorder, cascade), diff conversion, frequency analysis
-- Right panel: plot controls (port pair inputs, data mode combo, ripple fitting)
-- An embedded `QTextEdit` output console (redirected stdout via `write()`)
+```
+Quick_Sparam/
+├── Quick_Sparam_B.py      # 生产入口
+├── QSB_test.py            # 本地调试入口（不打包）
+├── main_window.py         # 主窗口 SParameterViewer_MainWin(QWidget)
+├── sparam_core.py         # 纯逻辑层（无UI依赖）
+├── app_utils.py           # Qt工具层
+├── Frequency_Analysis2.py # 死代码，暂留，不导入
+└── dialogs/
+    ├── __init__.py
+    ├── freq_analysis.py   # frequencyAnalysisDialog — 频域批量分析+Excel导出
+    ├── cascade.py         # CascadeDialog — S参数级联配置
+    ├── port_reduction.py  # PortReductionDialog — 端口阻抗端接/降阶
+    ├── port_reorder.py    # PortOrderEditor — 端口拖拽重排序
+    ├── se2diff.py         # DiffConversionDialog — 单端→差分转换
+    ├── port_selector.py   # PortSelector — 端口多选选择器
+    ├── port_name.py       # PortNameDialog — 端口命名（缺失时处理）
+    └── loading.py         # LoadingDialog — 长耗时进度对话框
+```
 
-### Core Functions (`Basic_function_module.py`)
-Standalone functions used by all UI modules:
-- `get_network / get_s / get_y / get_z` — load Touchstone files via `skrf.Network`
-- `enforce_nonzero_impedance / enforce_nonzero_z0` — fix zero-valued port impedances (common in some EDA exports)
-- `SE2diff / SE2dq_dqs / SE2diff_port` — single-ended to differential/mixed-mode conversion
-- `ripple_calc / ripple_calc1` — S-parameter ripple analysis with polynomial, IEEE 802.3-2022, or Savitzky-Golay smoothing fits
-- `parse_port_input / parse_port_input1` — parse port range strings like `"1 2 3"` or `"1:5"` or `"1:2:5"`
-- `freq_band_data_extract` — extract and annotate frequency-band data on plots
-- `resource_path` — resolves asset paths for both dev and PyInstaller frozen environments
+### Dependency Direction
 
-### Dialog Modules
-- `UI2_Port_reduction.py` — `PortReductionDialog`: UI for port impedance termination/reduction, produces a reduced `skrf.Network`
-- `UI2_Cascade.py` — `SParamCascadeDialog`: S-parameter cascading configuration dialog; receives a list of selected S-parameter files and returns `cascade_configs`
-- `UI2_PortOrderEditor.py` — `PortOrderEditor`: drag-and-drop port reordering dialog
-- `UI2_SE2Diff.py` — `DiffConversionDialog`: single-ended to differential conversion settings (noted in source as UI debug incomplete / port naming bug)
-- `UI2_Frequency_Analysis.py` — `frequencyAnalysisDialog`: batch S-parameter frequency-domain analysis with Excel export; takes `(S_data, parent)`; **this is the version imported by the main window**
-- `Frequency_Analysis2.py` — newer version of the same dialog, takes `(S_data, s_params_files, parent)`; not currently imported by any module, kept for future migration
-- `Longtime_block_hint.py` — `LoadingDialog`: indeterminate progress dialog for long-running operations; designed for use with a `QThread` worker; exposes `cancelled` flag and `set_message()` for live updates
-- `portname_setting.py` — `PortNameDialog`: handles missing port names in Touchstone files; offers manual edit (opens notepad/gvim), auto-generate (`Port1…PortN`), or cancel
-- `UI2_PortSelection.py` — `PortSelector`: multi-select port picker dialog; returns 1-based selected indices via `get_selected_indices()`; also exposes `PortSelector.select_ports(port_names, parent)` static helper
+```
+main_window  →  sparam_core
+main_window  →  app_utils
+main_window  →  dialogs/*
+dialogs/*    →  sparam_core
+dialogs/*    →  app_utils
+app_utils    ──(懒加载)──→  dialogs/port_selector, port_name
+```
 
-### Notes on Duplicate Files
-`Frequency_Analysis2.py` and `UI2_Frequency_Analysis.py` define the same class name (`frequencyAnalysisDialog`). The main window imports from `UI2_Frequency_Analysis.py` (old version, `(S_data, parent)`). `Frequency_Analysis2.py` is a newer unconnected version.
+`app_utils.check_and_set_port_names` 用函数体内懒导入 dialogs，避免循环依赖。
+
+### Entry Points
+- `Quick_Sparam_B.py` — 生产入口：配置 matplotlib 中文字体，创建 `QApplication`，实例化主窗口，调用 `check_beta_period()` 后进入事件循环。
+- `QSB_test.py` — 本地调试入口，启动后自动执行加载文件等操作，不随 PyInstaller 打包。
+
+### Main Window (`main_window.py`)
+`SParameterViewer_MainWin(QWidget)` 拥有：
+- `self.s_data`: `{filename → skrf.Network}` 的全局数据字典
+- `self.s_param / y_param / z_param`: 计算后的参数矩阵字典
+- `get_network(file_name)` / `get_s/y/z()` — 数据访问方法（懒加载+缓存）
+- 左栏：文件操作、端口操作（降阶/重排/级联）、差分转换、频域分析
+- 右栏：绘图控制（端口对输入、数据模式、纹波拟合）
+- 内嵌 `QTextEdit` 控制台（重定向 stdout）
+
+### Logic Layer (`sparam_core.py`)
+- **网络变换**：`enforce_nonzero_impedance`, `enforce_nonzero_z0`, `SE2diff`, `SE2dq_dqs`, `SE2diff_port`
+- **纹波分析**：`ripple_calc`, `ripple_calc1`, `_ieee_8023_fit`（多项式/IEEE 802.3-2022/Savitzky-Golay）
+- **端口解析**：`parse_port_input`, `parse_port_input1`（支持 `"1 2 3"` / `"1:5"` / `"1:2:5"` 格式）
+- 注意：`enforce_nonzero_impedance` 内部含一个 QDialog，是该层唯一的UI依赖
+
+### Qt Utility Layer (`app_utils.py`)
+- `show_error` — 统一错误弹窗
+- `resource_path` — PyInstaller 冻结环境下的资源路径解析
+- `freq_band_data_extract` — 频段标注绘图辅助
+- `plot_main_curves` / `plot_residuals` — 通用绘图函数
+- `check_and_set_port_names` — 端口名UI流程（懒导入 dialogs）
 
 ### matplotlib Backend
-Both `Frequency_Analysis2.py` and `UI2_Frequency_Analysis.py` call `matplotlib.use('Qt5Agg')` at module level. The environment has both PyQt5 and PyQt6 installed; the runtime Qt backend must stay consistent with whichever Qt binding is active. This call must appear before any `plt` imports take effect.
+不要在模块级调用 `matplotlib.use()`。环境同时安装了 PyQt5 和 PyQt6，`Qt5Agg` 后端与 PyQt6 不兼容，会导致频域分析对话框闪退。让 matplotlib 自动检测后端（`QtAgg` → Qt6Agg）。
 
 ### Chinese Locale
-All UI strings and comments are in Simplified Chinese. Font settings (`SimHei` on Windows, `WenQuanYi Zen Hei` on Linux) are applied globally in `Quick_Sparam_B.py` and locally in some dialogs to support Chinese labels and avoid minus-sign rendering issues (`axes.unicode_minus = False`).
+所有UI字符串和注释均为简体中文。字体设置（Windows: `SimHei`，Linux: `WenQuanYi Zen Hei`）在 `Quick_Sparam_B.py` 全局配置，同时设置 `axes.unicode_minus = False` 避免负号渲染问题。
