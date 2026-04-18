@@ -13,10 +13,12 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt
 import matplotlib.pyplot as plt
 from openpyxl.styles import Alignment
-from Basic_function_module import *
 import matplotlib
 import matplotlib.patches as mpatches
 matplotlib.use('Qt5Agg')  # 确保使用Qt5后端
+
+from app_utils import show_error, resource_path, freq_band_data_extract
+from sparam_core import parse_port_input
 
 
 class frequencyAnalysisDialog(QDialog):
@@ -299,7 +301,7 @@ class frequencyAnalysisDialog(QDialog):
 
                 # 处理每个文件
                 for file_idx, file2plot in enumerate(self.s_params_files):
-                    network = get_network(self.parent, file2plot)
+                    network = self.parent.get_network(file2plot)
                     num_port = network.nports
                     file_name = os.path.basename(file2plot)
                     # 初始化当前文件的结果列表
@@ -655,7 +657,7 @@ class frequencyAnalysisDialog(QDialog):
                 self.all_results[option] = {}  # 初始化当前option的数据结构
 
                 for file_path in self.s_params_files:
-                    network = get_network(self.parent, file_path)
+                    network = self.parent.get_network(file_path)
                     num_port = network.nports
                     short_name = os.path.basename(file_path)
 
@@ -1049,7 +1051,7 @@ class frequencyAnalysisDialog(QDialog):
         self.all_results = {}  # dict
         for file2plot in self.s_params_files:
             try:
-                network = get_network(self.parent, file2plot)
+                network = self.parent.get_network(file2plot)
                 # 根据S参数端口数量和排布方式生成port pairs
                 num_port = network.nports
                 if port_arrangement == 'inside':
