@@ -11,7 +11,7 @@ from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QListWidget, QLabel, QLineEdit, QMessageBox,
-    QComboBox, QGroupBox, QCheckBox, QGridLayout, QSpinBox,
+    QComboBox, QGroupBox, QCheckBox, QGridLayout,
     QTextEdit, QDialog
 )
 from PyQt6.QtCore import Qt
@@ -20,10 +20,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from sparam_core import (enforce_nonzero_impedance, enforce_nonzero_z0,
-                         SE2diff, SE2dq_dqs, SE2diff_port,
-                         ripple_calc, parse_port_input)
-from app_utils import (show_error, check_and_set_port_names,
-                       plot_main_curves, plot_residuals)
+                         SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,
+                         merge_ports_multi)
+from app_utils import show_error, check_and_set_port_names
 from dialogs.cascade import CascadeDialog
 from dialogs.freq_analysis import frequencyAnalysisDialog
 from dialogs.se2diff import DiffConversionDialog
@@ -32,6 +31,8 @@ from dialogs.port_reorder import PortOrderEditor
 from dialogs.port_selector import PortSelector
 from dialogs.port_name import PortNameDialog
 from dialogs.loading import LoadingDialog
+from dialogs.ripple import RippleFitDialog
+from dialogs.port_merge import PortMergeDialog
 
 
 class SParameterViewer_MainWin(QWidget):
@@ -118,50 +119,80 @@ class SParameterViewer_MainWin(QWidget):
         left_panel.setContentsMargins(5, 5, 15, 5)
         left_panel.setSpacing(10)
 
-        self.open_button = QPushButton('打开S参数')
-        self.open_button.setFixedSize(120, 40)
+        file_ops_group = QGroupBox("文件操作")
+        file_ops_layout = QVBoxLayout()
+        file_ops_layout.setSpacing(6)
+
+        self.open_button = QPushButton('📂 打开S参数')
+        self.open_button.setFixedHeight(38)
         self.open_button.clicked.connect(self.open_file_dialog)
-        left_panel.addWidget(self.open_button)
+        file_ops_layout.addWidget(self.open_button)
 
-        self.save_button = QPushButton('保存S参数')
-        self.save_button.setFixedSize(120, 40)
+        self.save_button = QPushButton('💾 保存S参数')
+        self.save_button.setFixedHeight(38)
         self.save_button.clicked.connect(self.save_sparameters)
-        left_panel.addWidget(self.save_button)
+        file_ops_layout.addWidget(self.save_button)
 
-        self.read_button = QPushButton('查看源文件')
-        self.read_button.setFixedSize(120, 40)
+        self.read_button = QPushButton('🔍 查看源文件')
+        self.read_button.setFixedHeight(38)
         self.read_button.clicked.connect(self.read_snp_file)
-        left_panel.addWidget(self.read_button)
+        file_ops_layout.addWidget(self.read_button)
 
-        self.delete_button = QPushButton('删除S参数')
-        self.delete_button.setFixedSize(120, 40)
+        self.delete_button = QPushButton('🗑️ 删除S参数')
+        self.delete_button.setFixedHeight(38)
         self.delete_button.clicked.connect(self.delete_selected_sparameters)
-        left_panel.addWidget(self.delete_button)
+        file_ops_layout.addWidget(self.delete_button)
 
-        self.port_reduction_button = QPushButton('端口reduction')
-        self.port_reduction_button.setFixedSize(120, 40)
-        self.port_reduction_button.clicked.connect(self.call_port_reduction)
-        left_panel.addWidget(self.port_reduction_button)
+        file_ops_group.setLayout(file_ops_layout)
+        left_panel.addWidget(file_ops_group)
 
-        self.port_reorder_button = QPushButton('端口重排')
-        self.port_reorder_button.setFixedSize(120, 40)
+        sparam_ops_group = QGroupBox("S参数操作")
+        sparam_ops_layout = QVBoxLayout()
+        sparam_ops_layout.setSpacing(4)
+
+        self.port_reorder_button = QPushButton('端口重新排序')
+        self.port_reorder_button.setFixedHeight(32)
         self.port_reorder_button.clicked.connect(self.call_port_reorder)
-        left_panel.addWidget(self.port_reorder_button)
+        sparam_ops_layout.addWidget(self.port_reorder_button)
+
+        self.port_reduction_button = QPushButton('重归一化/端口缩并')
+        self.port_reduction_button.setFixedHeight(32)
+        self.port_reduction_button.setToolTip(
+            "重新设置端口参考阻抗Zref（支持R//C结构）；删去不需要考虑的闲置端口")
+        self.port_reduction_button.clicked.connect(self.call_port_reduction)
+        sparam_ops_layout.addWidget(self.port_reduction_button)
+
+        self.port_merge_button = QPushButton('端口合并')
+        self.port_merge_button.setFixedHeight(32)
+        self.port_merge_button.setToolTip(
+            "将选中的 m 个端口在电气上并联，形成一个新端口")
+        self.port_merge_button.clicked.connect(self.call_port_merge)
+        sparam_ops_layout.addWidget(self.port_merge_button)
 
         self.cascade_button = QPushButton('S参数级联')
-        self.cascade_button.setFixedSize(120, 40)
+        self.cascade_button.setFixedHeight(32)
         self.cascade_button.clicked.connect(self.call_cascade)
-        left_panel.addWidget(self.cascade_button)
+        sparam_ops_layout.addWidget(self.cascade_button)
 
         self.diff_button = QPushButton('差分转换')
-        self.diff_button.setFixedSize(120, 40)
+        self.diff_button.setFixedHeight(32)
         self.diff_button.clicked.connect(self.call_diff_conversion)
-        left_panel.addWidget(self.diff_button)
+        sparam_ops_layout.addWidget(self.diff_button)
 
         self.analysis_btn = QPushButton('频域分析')
-        self.analysis_btn.setFixedSize(120, 40)
+        self.analysis_btn.setFixedHeight(32)
         self.analysis_btn.clicked.connect(self.call_frequency_analysis_dialog)
-        left_panel.addWidget(self.analysis_btn)
+        sparam_ops_layout.addWidget(self.analysis_btn)
+
+        self.ripple_btn = QPushButton('Ripple拟合')
+        self.ripple_btn.setFixedHeight(32)
+        self.ripple_btn.clicked.connect(self.call_ripple_dialog)
+        sparam_ops_layout.addWidget(self.ripple_btn)
+
+        sparam_ops_group.setLayout(sparam_ops_layout)
+        left_panel.addWidget(sparam_ops_group)
+
+        left_panel.addStretch()
 
         # ========== 右侧内容区 ==========
         right_panel = QVBoxLayout()
@@ -219,7 +250,8 @@ class SParameterViewer_MainWin(QWidget):
         self.data_mode_combo = QComboBox()
         self.data_mode_combo.addItems([
             "幅度 (dB)", "幅度 (abs)", "相位 (度)", "相位 (rad)",
-            "unwrap相位 (度)", "unwrap相位 (rad)", "群延迟 (fs)", "阻抗参数(mohm)", "导纳参数"
+            "unwrap相位 (度)", "unwrap相位 (rad)", "群延迟 (fs)", "阻抗参数(mohm)", "导纳参数",
+            "Z电容 (pF)"
         ])
         plot_right_layout.addWidget(self.data_mode_combo, 2, 1)
 
@@ -239,73 +271,7 @@ class SParameterViewer_MainWin(QWidget):
         plot_layout.addLayout(plot_right_layout, stretch=2)
         plot_group.setLayout(plot_layout)
 
-        # Ripple 分析
-        fit_group = QGroupBox("Ripple拟合选项")
-        fit_layout = QVBoxLayout()
-
-        freq_input_layout = QHBoxLayout()
-        freq_input_layout.addWidget(QLabel('起始频率 (GHz):'))
-        self.start_freq_input = QLineEdit("0")
-        freq_input_layout.addWidget(self.start_freq_input)
-        freq_input_layout.addSpacing(10)
-        freq_input_layout.addWidget(QLabel('终止频率 (GHz):'))
-        self.stop_freq_input = QLineEdit()
-        freq_input_layout.addWidget(self.stop_freq_input)
-        freq_input_layout.addSpacing(10)
-        freq_input_layout.addWidget(QLabel('频率间隔 (GHz):'))
-        self.freq_step_input = QLineEdit("0")
-        self.freq_step_input.setEnabled(False)
-        freq_input_layout.addWidget(self.freq_step_input)
-        freq_input_layout.addStretch()
-        fit_layout.addLayout(freq_input_layout)
-
-        control_grid = QGridLayout()
-        control_grid.addWidget(QLabel("拟合方法:"), 1, 2)
-        self.fit_method = QComboBox()
-        self.fit_method.addItems(["n次多项式", "IEEE_std_802.3-2022", "平滑函数"])
-        self.fit_method.currentTextChanged.connect(self._update_fit_ui)
-        control_grid.addWidget(self.fit_method, 1, 3)
-
-        self.poly_order_label = QLabel("多项式阶数:")
-        self.poly_order_input = QSpinBox()
-        self.poly_order_input.setRange(1, 10)
-        self.poly_order_input.setValue(5)
-        control_grid.addWidget(self.poly_order_label, 2, 2)
-        control_grid.addWidget(self.poly_order_input, 2, 3)
-
-        self.ieee_label = QLabel("93A-51公式: a0 + a1*sqrt(f) + a2*f + a4*f^2")
-        self.ieee_label.setStyleSheet("color: #666; font-style: Times New Roman")
-        self.ieee_label.hide()
-        control_grid.addWidget(self.ieee_label, 2, 2, 1, 2)
-        self.ieee_label.setFixedSize(300, 20)
-
-        self.smooth_window_label = QLabel("平滑窗长度:")
-        self.smooth_window_input = QSpinBox()
-        self.smooth_window_input.setRange(3, 51)
-        self.smooth_window_input.setValue(21)
-        self.smooth_window_input.setSingleStep(2)
-        self.smooth_order_label = QLabel("阶数:")
-        self.smooth_order_input = QSpinBox()
-        self.smooth_order_input.setRange(1, 5)
-        self.smooth_order_input.setValue(3)
-        control_grid.addWidget(self.smooth_window_label, 2, 2)
-        control_grid.addWidget(self.smooth_window_input, 2, 3)
-        control_grid.addWidget(self.smooth_order_label, 3, 2)
-        control_grid.addWidget(self.smooth_order_input, 3, 3)
-        self.smooth_window_label.hide()
-        self.smooth_window_input.hide()
-        self.smooth_order_label.hide()
-        self.smooth_order_input.hide()
-
-        self.ripple_button = QPushButton('Ripple 分析')
-        self.ripple_button.setFixedHeight(50)
-        self.ripple_button.clicked.connect(self.call_ripple_analysis)
-        control_grid.addWidget(self.ripple_button, 1, 0, 2, 2)
-        fit_layout.addLayout(control_grid)
-        fit_group.setLayout(fit_layout)
-
         right_panel.addWidget(plot_group, stretch=2)
-        right_panel.addWidget(fit_group, stretch=2)
 
         main_layout.addLayout(left_panel, stretch=1)
         main_layout.addLayout(right_panel, stretch=4)
@@ -340,7 +306,7 @@ class SParameterViewer_MainWin(QWidget):
 
         self._original_stdout = sys.stdout
         sys.stdout = self
-        main_layout.addLayout(down_panel, stretch=3)
+        main_layout.addLayout(down_panel, stretch=2)
 
         self.setLayout(main_layout)
         self._setup_ui_style()
@@ -364,9 +330,9 @@ class SParameterViewer_MainWin(QWidget):
         """
         for btn in [self.open_button, self.save_button, self.diff_button,
                     self.port_reduction_button, self.cascade_button,
-                    self.port_reorder_button, self.delete_button,
-                    self.analysis_btn, self.plot_button, self.ripple_button,
-                    self.read_button]:
+                    self.port_reorder_button, self.port_merge_button,
+                    self.delete_button, self.analysis_btn, self.plot_button,
+                    self.ripple_btn, self.read_button]:
             btn.setStyleSheet(button_style)
 
         self.file_list.setStyleSheet("""
@@ -379,25 +345,6 @@ class SParameterViewer_MainWin(QWidget):
                 padding: 5px;
             }
         """)
-
-    def _update_fit_ui(self, method):
-        self.poly_order_label.hide()
-        self.poly_order_input.hide()
-        self.ieee_label.hide()
-        self.smooth_window_label.hide()
-        self.smooth_window_input.hide()
-        self.smooth_order_label.hide()
-        self.smooth_order_input.hide()
-        if method == "n次多项式":
-            self.poly_order_label.show()
-            self.poly_order_input.show()
-        elif method == "IEEE_std_802.3-2022":
-            self.ieee_label.show()
-        elif method == "平滑函数":
-            self.smooth_window_label.show()
-            self.smooth_window_input.show()
-            self.smooth_order_label.show()
-            self.smooth_order_input.show()
 
     def write(self, text):
         cursor = self.output_console.textCursor()
@@ -628,6 +575,10 @@ class SParameterViewer_MainWin(QWidget):
             phase = np.unwrap(np.angle(param))
             tau_g = -np.gradient(phase, freqG * 1e9) / (2 * np.pi)
             y_data = tau_g * 1e12
+        elif data_mode == "Z电容 (pF)":
+            with np.errstate(divide='ignore', invalid='ignore'):
+                y_data = -1.0 / (2 * np.pi * freqG * 1e9 * np.imag(param)) * 1e12
+            label = f'{network.name}_C{p1},{p2}'
 
         if self.legend_checkbox.isChecked():
             line, = self.ax.plot(freqG, y_data, label=label, picker=5)
@@ -720,32 +671,38 @@ class SParameterViewer_MainWin(QWidget):
                         port2_plot = plot_data['port2']
                         print(f"{file_name}")
 
+                        def _get_params(fname):
+                            if data_mode in ('阻抗参数(mohm)', 'Z电容 (pF)'):
+                                return self.get_z(fname)
+                            elif data_mode == '导纳参数':
+                                return self.get_y(fname)
+                            else:
+                                return self.get_s(fname)
+
                         if mapping_mode == "一 一对应":
                             if len(port1_plot) != len(port2_plot):
                                 QMessageBox.warning(self, '输入错误', '一一对应模式需要端口数量相同！')
                                 return
                             for p1, p2 in zip(port1_plot, port2_plot):
-                                if data_mode == '阻抗参数(mohm)':
-                                    line = self._plot_single_curve(network, self.get_z(file_name), p1, p2)
-                                elif data_mode == '导纳参数':
-                                    line = self._plot_single_curve(network, self.get_y(file_name), p1, p2)
-                                else:
-                                    line = self._plot_single_curve(network, self.get_s(file_name), p1, p2)
+                                line = self._plot_single_curve(network, _get_params(file_name), p1, p2)
                                 self.plot_lines.append(line)
                         elif mapping_mode == "交叉映射":
                             for p1 in port1_plot:
                                 for p2 in port2_plot:
-                                    if data_mode == '阻抗参数(mohm)':
-                                        line = self._plot_single_curve(network, self.get_z(file_name), p1, p2)
-                                    elif data_mode == '导纳参数':
-                                        line = self._plot_single_curve(network, self.get_y(file_name), p1, p2)
-                                    else:
-                                        line = self._plot_single_curve(network, self.get_s(file_name), p1, p2)
+                                    line = self._plot_single_curve(network, _get_params(file_name), p1, p2)
                                     self.plot_lines.append(line)
                     except Exception as e:
                         show_error(self, f"处理文件 {file_name} 时出错: {str(e)}")
                         continue
 
+            if data_mode == 'Z电容 (pF)':
+                self.ax.text(
+                    0.01, 0.01,
+                    r"$C = \frac{-1}{2\pi f \cdot \mathrm{Im}[Z_{ij}]}$  (pF)",
+                    transform=self.ax.transAxes,
+                    fontsize=10, color='gray', va='bottom', ha='left',
+                    bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.6, ec='none')
+                )
             self.ax.legend()
             if hasattr(self, '_cid'):
                 self.fig.canvas.mpl_disconnect(self._cid)
@@ -965,6 +922,55 @@ class SParameterViewer_MainWin(QWidget):
             show_error(self, f"操作执行出错: {str(e)}")
             traceback.print_exc()
 
+    def call_port_merge(self):
+        try:
+            selected_files = [item.text() for item in self.file_list.selectedItems()]
+            if not selected_files:
+                QMessageBox.warning(self, '错误', '请先选择文件！')
+                return
+            if len(selected_files) > 1:
+                QMessageBox.information(self, "提示",
+                                        "检测到多文件选择，请确定选择的S参数以同样的配置处理端口")
+
+            dialog = PortMergeDialog(self, selected_files)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+
+            merge_groups_1based, z0_list = dialog.get_result()
+            print('端口合并配置:')
+            for i, (group, z0) in enumerate(zip(merge_groups_1based, z0_list)):
+                print(f'  第{i + 1}组: 端口 {group} → Merge_port, Z0={z0}Ω')
+
+            for file_name in selected_files:
+                try:
+                    network_ori = self.get_network(file_name)
+                    network = network_ori.copy()
+                    n_ports = network.nports
+
+                    merge_groups_0based = [[p - 1 for p in g] for g in merge_groups_1based]
+                    all_ports = [p for g in merge_groups_0based for p in g]
+                    if all_ports and max(all_ports) >= n_ports:
+                        QMessageBox.warning(self, '错误',
+                                            f'文件 {network.name} 端口范围超出！'
+                                            f'最大端口数为 {n_ports}')
+                        continue
+
+                    new_network = merge_ports_multi(network, merge_groups_0based, z0_list)
+                    suffix = f'_merged.s{new_network.nports}p'
+                    base = os.path.splitext(network_ori.name)[0]
+                    new_file_name = self.add_unique_filename(base + suffix)
+                    new_network.name = new_file_name
+                    self.s_data[new_file_name] = new_network
+                    print(f'合并完成: {new_file_name}')
+                    print('新端口名称:')
+                    print(*new_network.port_names, sep='\n')
+                except Exception as e:
+                    QMessageBox.warning(self, '处理错误',
+                                        f'文件 {file_name} 处理失败: {str(e)}')
+                    continue
+        except Exception as e:
+            show_error(self, f"操作执行出错: {str(e)}")
+
     def call_cascade(self):
         try:
             selected_files = [item.text() for item in self.file_list.selectedItems()]
@@ -1030,65 +1036,13 @@ class SParameterViewer_MainWin(QWidget):
         except Exception as e:
             show_error(self, f"出错: {str(e)}")
 
-    def call_ripple_analysis(self):
-        try:
-            selected_files = [item.text() for item in self.file_list.selectedItems()]
-            port1 = self.port1_input.text().strip()
-            port2 = self.port2_input.text().strip()
-            start_freq = self.start_freq_input.text().strip()
-            stop_freq = self.stop_freq_input.text().strip()
-            method = self.fit_method.currentText()
-            data_mode = self.data_mode_combo.currentText()
-
-            if not (selected_files and port1 and port2 and start_freq and stop_freq):
-                QMessageBox.warning(self, '输入错误', '请选择文件并输入端口1、端口2、起始频率和终止频率！')
-                return
-
-            try:
-                port1_list = parse_port_input(port1)
-                port2_list = parse_port_input(port2)
-                start_freq = float(start_freq)
-                stop_freq = float(stop_freq)
-            except (ValueError, TypeError) as e:
-                QMessageBox.warning(self, '输入错误', f'输入参数格式错误: {str(e)}')
-                return
-
-            results_data = []
-            results_text = []
-            for file_name in selected_files:
-                try:
-                    network = self.get_network(file_name)
-                    for p1, p2 in zip(port1_list, port2_list):
-                        if max(p1, p2) > network.s.shape[1]:
-                            QMessageBox.warning(self, '端口错误', f'文件 {file_name} 的端口数不足！')
-                            continue
-                        if method == "n次多项式":
-                            fit_params = {'order': self.poly_order_input.value()}
-                        elif method == "平滑函数":
-                            fit_params = {
-                                'window_length': self.smooth_window_input.value(),
-                                'polyorder': self.smooth_order_input.value()
-                            }
-                        else:
-                            fit_params = {}
-                        result = ripple_calc(network, p1, p2, start_freq, stop_freq,
-                                             data_mode, method, fit_params)
-                        results_data.append(result)
-                        results_text.append(f"{result['label']}: ripple = {result['max_ripple']:.4f} ")
-                except Exception as e:
-                    show_error(self, f"处理文件 {file_name} 时出错: {str(e)}")
-                    continue
-
-            if results_data:
-                plot_main_curves(results_data, data_mode)
-                plot_residuals(results_data, data_mode)
-                print('\nRipple 分析结果:')
-                for text in results_text:
-                    print(text)
-            else:
-                QMessageBox.warning(self, '无结果', '没有生成任何有效结果！')
-        except Exception:
-            show_error(self, "保存文件时出错")
+    def call_ripple_dialog(self):
+        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        if not selected_files:
+            QMessageBox.warning(self, '错误', '请先选择文件！')
+            return
+        dialog = RippleFitDialog(self, selected_files)
+        dialog.exec()
 
     def call_frequency_analysis_dialog(self):
         dialog = frequencyAnalysisDialog(self.s_data, self)
