@@ -785,7 +785,10 @@ class SParameterViewer_MainWin(QWidget):
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
 
-        dialog = DiffConversionDialog(len(selected_files[0].split('.')[0].split('s')[-1][0]))
+        network = self.get_network(selected_files[0])
+        if not network:
+            return
+        dialog = DiffConversionDialog(network.nports)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
                 params = dialog.get_conversion_params()

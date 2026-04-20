@@ -1,4 +1,3 @@
-# 界面调试未完成/端口命名有bug
 from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QRadioButton,
                              QGroupBox, QButtonGroup, QFrame, QMessageBox)
@@ -48,15 +47,19 @@ class DiffConversionDialog(QDialog):
         self.inside_radio = QRadioButton("端口序号按侧分布")
         port_layout.addWidget(self.inside_radio)
         inside_img = QLabel()
-        inside_img.setPixmap(QPixmap(resource_path("resources/Port_inside.PNG")))
+        px_inside = QPixmap(resource_path("resources/Port_inside.PNG"))
+        inside_img.setPixmap(px_inside if not px_inside.isNull() else QPixmap())
         inside_img.setScaledContents(True)
+        inside_img.setFixedHeight(80)
         port_layout.addWidget(inside_img)
 
         self.inline_radio = QRadioButton("端口序号按线分布")
         port_layout.addWidget(self.inline_radio)
         inline_img = QLabel()
-        inline_img.setPixmap(QPixmap(resource_path("resources/Port_inline.PNG")))
+        px_inline = QPixmap(resource_path("resources/Port_inline.PNG"))
+        inline_img.setPixmap(px_inline if not px_inline.isNull() else QPixmap())
         inline_img.setScaledContents(True)
+        inline_img.setFixedHeight(80)
         port_layout.addWidget(inline_img)
 
         port_group.setLayout(port_layout)
