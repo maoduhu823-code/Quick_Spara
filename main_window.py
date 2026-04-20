@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 from sparam_core import (enforce_nonzero_impedance, enforce_nonzero_z0,
                          SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,
-                         merge_ports_multi)
+                         merge_ports_multi, compute_time_domain)
 from app_utils import show_error, check_and_set_port_names
 from dialogs.cascade import CascadeDialog
 from dialogs.freq_analysis import frequencyAnalysisDialog
@@ -189,6 +189,11 @@ class SParameterViewer_MainWin(QWidget):
         self.ripple_btn.clicked.connect(self.call_ripple_dialog)
         sparam_ops_layout.addWidget(self.ripple_btn)
 
+        self.td_analysis_btn = QPushButton('时域分析')
+        self.td_analysis_btn.setFixedHeight(32)
+        self.td_analysis_btn.clicked.connect(self.call_time_domain_dialog)
+        sparam_ops_layout.addWidget(self.td_analysis_btn)
+
         sparam_ops_group.setLayout(sparam_ops_layout)
         left_panel.addWidget(sparam_ops_group)
 
@@ -251,7 +256,7 @@ class SParameterViewer_MainWin(QWidget):
         self.data_mode_combo.addItems([
             "幅度 (dB)", "幅度 (abs)", "相位 (度)", "相位 (rad)",
             "unwrap相位 (度)", "unwrap相位 (rad)", "群延迟 (fs)", "阻抗参数(mohm)", "导纳参数",
-            "Z电容 (pF)"
+            "Z电容 (pF)", "TDR (时域反射)"
         ])
         plot_right_layout.addWidget(self.data_mode_combo, 2, 1)
 
@@ -332,7 +337,7 @@ class SParameterViewer_MainWin(QWidget):
                     self.port_reduction_button, self.cascade_button,
                     self.port_reorder_button, self.port_merge_button,
                     self.delete_button, self.analysis_btn, self.plot_button,
-                    self.ripple_btn, self.read_button]:
+                    self.ripple_btn, self.td_analysis_btn, self.read_button]:
             btn.setStyleSheet(button_style)
 
         self.file_list.setStyleSheet("""
@@ -557,6 +562,23 @@ class SParameterViewer_MainWin(QWidget):
         freqG = network.frequency.f / 1e9
         label = f'{network.name}_S{p1},{p2}'
 
+        # TDR 使用时间轴，提前返回避免频率标注逻辑
+        if data_mode == "TDR (时域反射)":
+            result = compute_time_domain(network, p1, p2, "TDR")
+            x_td = result["time_ps"]
+            y_td = result["y_data"]
+            lbl  = f'{network.name}_TDR_S{p1},{p2}'
+            if self.legend_checkbox.isChecked():
+                line, = self.ax.plot(x_td, y_td, label=lbl, picker=5)
+            else:
+                line, = self.ax.plot(x_td, y_td, picker=5)
+            line.network_name = network.name
+            line.port_pair    = (p1, p2)
+            line.data_mode    = data_mode
+            line.freq_data    = x_td
+            line.value_data   = y_td
+            return line
+
         if data_mode == "幅度 (dB)":
             y_data = 20 * np.log10(np.abs(param))
         elif data_mode in ("幅度 (abs)", "导纳参数"):
@@ -648,8 +670,12 @@ class SParameterViewer_MainWin(QWidget):
             plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
         plt.rcParams['axes.unicode_minus'] = False
         data_mode = self.data_mode_combo.currentText()
-        self.ax.set_ylabel(data_mode)
-        self.ax.set_xlabel("频率 (GHz)")
+        if data_mode == "TDR (时域反射)":
+            self.ax.set_xlabel("时间 (ps)")
+            self.ax.set_ylabel("Impedance (Ω)")
+        else:
+            self.ax.set_xlabel("频率 (GHz)")
+            self.ax.set_ylabel(data_mode)
         self.ax.grid(True)
 
         self.loading = LoadingDialog(self)
@@ -1046,4 +1072,9 @@ class SParameterViewer_MainWin(QWidget):
 
     def call_frequency_analysis_dialog(self):
         dialog = frequencyAnalysisDialog(self.s_data, self)
+        dialog.show()
+
+    def call_time_domain_dialog(self):
+        from dialogs.time_domain import TimeDomainDialog
+        dialog = TimeDomainDialog(self.s_data, self)
         dialog.show()
