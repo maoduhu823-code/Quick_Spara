@@ -130,10 +130,16 @@ class TimeDomainDialog(QDialog):
         btn_n.clicked.connect(lambda: self._on_auto("n_points", self._n_edit))
         grid.addWidget(btn_n, 2, 2)
 
-        # Z0
-        grid.addWidget(QLabel("参考阻抗 Z0 (Ω):"), 3, 0)
-        self._z0_edit = QLineEdit("50")
-        grid.addWidget(self._z0_edit, 3, 1)
+        # 频域窗
+        grid.addWidget(QLabel("频域窗:"), 3, 0)
+        self._win_combo = QComboBox()
+        self._win_combo.addItems(["高斯", "矩形", "汉宁", "汉明", "布莱克曼"])
+        self._win_combo.setToolTip(
+            "高斯：最小时带积，无旁瓣；矩形：分辨率最高但旁瓣大；\n"
+            "汉宁/汉明/布莱克曼：旁瓣依次递减，分辨率依次降低。\n"
+            "所有窗均以上升沿参数 tr 对应的带宽为截止频率。"
+        )
+        grid.addWidget(self._win_combo, 3, 1)
 
         return grp
 
@@ -170,6 +176,7 @@ class TimeDomainDialog(QDialog):
         top.addWidget(QLabel("端口1:"))
         self._port1_edit = QLineEdit()
         self._port1_edit.setPlaceholderText("如 1 或 1:4")
+        self._port1_edit.textChanged.connect(self._sync_port2_if_tdr)
         top.addWidget(self._port1_edit)
 
         top.addWidget(QLabel("端口2:"))
@@ -254,8 +261,14 @@ class TimeDomainDialog(QDialog):
         self._pw_label.setVisible(is_pulse)
         self._pw_edit.setVisible(is_pulse)
         is_tdr = (wf == "TDR")
-        self._z0_edit.setEnabled(is_tdr)
+        self._port2_edit.setEnabled(not is_tdr)
+        if is_tdr:
+            self._port2_edit.setText(self._port1_edit.text())
         self._compat_timer.start(300)
+
+    def _sync_port2_if_tdr(self, text: str):
+        if self._current_waveform() == "TDR":
+            self._port2_edit.setText(text)
 
     # ── 槽函数：参数自动填充 ─────────────────────────────────────────────────
 
@@ -379,10 +392,15 @@ class TimeDomainDialog(QDialog):
             tr = float(self._tr_edit.text())
             dt = float(self._dt_edit.text())
             n  = int(self._n_edit.text())
-            z0 = float(self._z0_edit.text())
         except ValueError:
             QMessageBox.warning(self, "参数错误", "请检查时域参数输入（必须为数字）")
             return
+
+        _WIN_MAP = {
+            "高斯": "gaussian", "矩形": "rect", "汉宁": "hanning",
+            "汉明": "hamming",  "布莱克曼": "blackman",
+        }
+        window_type = _WIN_MAP.get(self._win_combo.currentText(), "gaussian")
 
         pw_ps = None
         if self._current_waveform() == "pulse":
@@ -424,11 +442,18 @@ class TimeDomainDialog(QDialog):
                     print(f"[时域分析] 未找到网络: {info['file']}")
                     continue
 
+                port_idx = info["p1"] - 1
+                try:
+                    z0 = float(np.real(network.z0[0, port_idx]))
+                except Exception:
+                    z0 = 50.0
+
                 result = compute_time_domain(
                     network, info["p1"], info["p2"],
                     waveform=info["waveform"],
                     tr_ps=tr, dt_ps=dt, n_points=n,
-                    z0=z0, pulse_width_ps=pw_ps
+                    z0=z0, pulse_width_ps=pw_ps,
+                    window_type=window_type
                 )
 
                 x = result["time_ps"] / 1000 if unit == "ns" else result["time_ps"]

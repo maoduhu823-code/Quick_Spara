@@ -535,10 +535,30 @@ def td_compat_check(network: rf.Network, tr_ps: float,
 
 
 def _td_impulse_response(freq_full: np.ndarray, s_full: np.ndarray,
-                         n_fft: int, tr_ps: float):
-    """计算冲激响应（内部函数）。"""
+                         n_fft: int, tr_ps: float,
+                         window_type: str = "gaussian"):
+    """计算冲激响应（内部函数）。freq_full 必须从 f=0 开始，间距为 df。
+
+    window_type : "gaussian" | "rect" | "hanning" | "hamming" | "blackman"
+    所有窗均以 sigma_f = 0.35/tr_ps 为截止带宽；古典窗在 [0, sigma_f] 内有效，
+    高斯窗则以 sigma_f 为 σ 向高频自然衰减。
+    """
+    # freq_full[0]=0，df = freq_full[1]（均匀网格）
+    df_Hz = freq_full[1] if len(freq_full) > 1 else freq_full[-1]
+
     sigma_f = 0.35 / (tr_ps * 1e-12)
-    W = np.exp(-0.5 * (freq_full / sigma_f) ** 2)
+    x = np.pi * freq_full / sigma_f   # 古典窗相位参数，[0, π] 对应 [0, sigma_f]
+    if window_type == "rect":
+        W = (freq_full <= sigma_f).astype(float)
+    elif window_type == "hanning":
+        W = np.where(freq_full <= sigma_f, 0.5 * (1.0 + np.cos(x)), 0.0)
+    elif window_type == "hamming":
+        W = np.where(freq_full <= sigma_f, 0.54 + 0.46 * np.cos(x), 0.0)
+    elif window_type == "blackman":
+        W = np.where(freq_full <= sigma_f,
+                     0.42 + 0.5 * np.cos(x) + 0.08 * np.cos(2.0 * x), 0.0)
+    else:  # gaussian（默认）
+        W = np.exp(-0.5 * (freq_full / sigma_f) ** 2)
     s_windowed = s_full * W
 
     # 构造 irfft 输入（长度 n_fft//2 + 1），补零或截断
@@ -549,15 +569,15 @@ def _td_impulse_response(freq_full: np.ndarray, s_full: np.ndarray,
 
     h_t = np.fft.irfft(s_padded, n=n_fft)
 
-    N_f = len(freq_full)
-    fmax = freq_full[-1]
-    dt_s = (N_f - 1) / (n_fft * fmax)
+    # dt = 1/(n_fft * df)，与 irfft 输出对应
+    dt_s  = 1.0 / (n_fft * df_Hz)
     time_s = np.arange(n_fft) * dt_s
     return time_s, h_t
 
 
-def _td_step_response(h_t: np.ndarray, dt_s: float) -> np.ndarray:
-    return np.cumsum(h_t) * dt_s
+def _td_step_response(h_t: np.ndarray) -> np.ndarray:
+    # irfft 已归一化使 sum(h_t) = S(0)，直接 cumsum 即得阶跃响应（无需乘 dt）
+    return np.cumsum(h_t)
 
 
 def _td_tdr_impedance(step_t: np.ndarray, z0: float) -> np.ndarray:
@@ -569,29 +589,41 @@ def compute_time_domain(network: rf.Network, p1: int, p2: int,
                         waveform: str = "TDR",
                         tr_ps: float = None, dt_ps: float = None,
                         n_points: int = None, z0: float = 50.0,
-                        pulse_width_ps: float = None) -> dict:
+                        pulse_width_ps: float = None,
+                        window_type: str = "gaussian") -> dict:
     """
     计算时域波形。
 
-    waveform : "TDR" | "impulse" | "step" | "pulse"
+    waveform    : "TDR" | "impulse" | "step" | "pulse"
+    window_type : "gaussian" | "rect" | "hanning" | "hamming" | "blackman"
     返回 {"time_ps", "y_data", "label", "y_label", "compat_status"}
     """
-    defaults = td_default_params(network)
-    tr_ps    = tr_ps    if tr_ps    is not None else defaults["tr_ps"]
-    dt_ps    = dt_ps    if dt_ps    is not None else defaults["dt_ps"]
-    n_points = n_points if n_points is not None else defaults["n_points"]
-
-    compat = td_compat_check(network, tr_ps, dt_ps, n_points)
-
-    # 原始 S 参数
+    # 原始 S 参数（先取频率轴，用于推导 n_points）
     freq_orig = network.f
     s_orig    = network.s[:, p1 - 1, p2 - 1]
     df_Hz     = (freq_orig[-1] - freq_orig[0]) / (len(freq_orig) - 1)
 
+    defaults = td_default_params(network)
+    tr_ps = tr_ps if tr_ps is not None else defaults["tr_ps"]
+
+    # dt_ps → n_points：若用户指定 dt_ps 而未指定 n_points，从时间步长推算点数
+    if n_points is None:
+        if dt_ps is not None:
+            T_total_ps = 1e12 / df_Hz
+            n_raw = int(np.ceil(T_total_ps / dt_ps))
+            n_points = int(2 ** np.ceil(np.log2(max(n_raw, 4))))
+        else:
+            n_points = defaults["n_points"]
+    if dt_ps is None:
+        dt_ps = defaults["dt_ps"]
+
+    compat = td_compat_check(network, tr_ps, dt_ps, n_points)
+
     # 从 DC 开始构造均匀频率轴
-    N_dc = max(0, round(freq_orig[0] / df_Hz))
+    # 若数据不从 DC 起始，至少补一个 DC 点（irfft bin-0 必须对应 f=0）
     s_dc = 0.0 if (p1 == p2) else 1.0
-    if N_dc > 0:
+    if freq_orig[0] > 0:
+        N_dc = max(1, round(freq_orig[0] / df_Hz))
         dc_part = np.linspace(s_dc, np.real(s_orig[0]), N_dc) + 0j
         s_full  = np.concatenate([dc_part, s_orig])
         freq_full = np.arange(len(s_full)) * df_Hz
@@ -600,9 +632,9 @@ def compute_time_domain(network: rf.Network, p1: int, p2: int,
         freq_full = freq_orig.copy()
 
     # 计算冲激响应与阶跃响应
-    time_s, h_t = _td_impulse_response(freq_full, s_full, n_points, tr_ps)
+    time_s, h_t = _td_impulse_response(freq_full, s_full, n_points, tr_ps, window_type)
     dt_s        = time_s[1] - time_s[0] if len(time_s) > 1 else 1.0
-    step_t      = _td_step_response(h_t, dt_s)
+    step_t      = _td_step_response(h_t)
 
     if waveform == "TDR":
         y_data  = _td_tdr_impedance(step_t, z0)
@@ -625,7 +657,8 @@ def compute_time_domain(network: rf.Network, p1: int, p2: int,
         y_label = "Step Response"
 
     import os
-    label = f"{os.path.basename(network.name)}_S{p1},{p2}_{waveform}"
+    net_name = network.name or ""
+    label = f"{os.path.basename(net_name)}_S{p1},{p2}_{waveform}"
     return {
         "time_ps":      time_s * 1e12,
         "y_data":       np.real(y_data),

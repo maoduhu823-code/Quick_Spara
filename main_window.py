@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QListWidget, QLabel, QLineEdit, QMessageBox,
     QComboBox, QGroupBox, QCheckBox, QGridLayout,
-    QTextEdit, QDialog
+    QTextEdit, QDialog, QInputDialog
 )
 from PyQt6.QtCore import Qt
 from openpyxl import Workbook, load_workbook
@@ -33,6 +33,22 @@ from dialogs.port_name import PortNameDialog
 from dialogs.loading import LoadingDialog
 from dialogs.ripple import RippleFitDialog
 from dialogs.port_merge import PortMergeDialog
+from dialogs.port_management import PortManagementDialog, Z0EditDialog
+
+# 参数类型 → 数据切面选项
+_FACET_OPTIONS = {
+    'S参数': ['幅度(dB)', '幅度(abs)', '相位(度)', '相位(rad)',
+              'unwrap相位(度)', 'unwrap相位(rad)', '实部', '虚部', '群延迟(fs)'],
+    'Y参数': ['导纳(abs)', '幅度(dB)', '相位(度)', '实部', '虚部'],
+    'Z参数': ['阻抗(mΩ)', '幅度(dB)', '相位(度)', '实部(ESR)', '虚部', '电容(pF)'],
+    '时域':  ['TDR阻抗', '阶跃响应', '冲激响应', '脉冲响应'],
+}
+# (参数类型, 数据切面) → (X轴缩放, Y轴缩放) 默认值
+_DEFAULT_SCALES = {
+    ('Z参数', '阻抗(mΩ)'): ('对数', '对数'),
+    ('Y参数', '导纳(abs)'): ('对数', '对数'),
+    ('Z参数', '实部(ESR)'): ('对数', '线性'),
+}
 
 
 class SParameterViewer_MainWin(QWidget):
@@ -150,24 +166,12 @@ class SParameterViewer_MainWin(QWidget):
         sparam_ops_layout = QVBoxLayout()
         sparam_ops_layout.setSpacing(4)
 
-        self.port_reorder_button = QPushButton('端口重新排序')
-        self.port_reorder_button.setFixedHeight(32)
-        self.port_reorder_button.clicked.connect(self.call_port_reorder)
-        sparam_ops_layout.addWidget(self.port_reorder_button)
-
-        self.port_reduction_button = QPushButton('重归一化/端口缩并')
-        self.port_reduction_button.setFixedHeight(32)
-        self.port_reduction_button.setToolTip(
-            "重新设置端口参考阻抗Zref（支持R//C结构）；删去不需要考虑的闲置端口")
-        self.port_reduction_button.clicked.connect(self.call_port_reduction)
-        sparam_ops_layout.addWidget(self.port_reduction_button)
-
-        self.port_merge_button = QPushButton('端口合并')
-        self.port_merge_button.setFixedHeight(32)
-        self.port_merge_button.setToolTip(
-            "将选中的 m 个端口在电气上并联，形成一个新端口")
-        self.port_merge_button.clicked.connect(self.call_port_merge)
-        sparam_ops_layout.addWidget(self.port_merge_button)
+        self.port_management_button = QPushButton('端口处理')
+        self.port_management_button.setFixedHeight(32)
+        self.port_management_button.setToolTip(
+            "端口元数据编辑（端口名/参考阻抗）、拓扑变换（重排/合并）、阻抗变换（重归一化）")
+        self.port_management_button.clicked.connect(self.call_port_management)
+        sparam_ops_layout.addWidget(self.port_management_button)
 
         self.cascade_button = QPushButton('S参数级联')
         self.cascade_button.setFixedHeight(32)
@@ -238,39 +242,86 @@ class SParameterViewer_MainWin(QWidget):
         self.port_select_btn.setFixedWidth(80)
         plot_right_layout.addWidget(self.port_select_btn, 0, 0)
 
-        self.Basic_info = QPushButton('信息一览')
+        self.btn_freq_list = QPushButton('频点列表')
+        self.btn_freq_list.clicked.connect(self.print_freq_axis)
+        plot_right_layout.addWidget(self.btn_freq_list, 0, 1)
+
+        self.Basic_info = QPushButton('文件信息')
         self.Basic_info.clicked.connect(self.Basic_info_print)
         plot_right_layout.addWidget(self.Basic_info, 0, 2)
 
-        self.BandWidth_focus = QPushButton('频段切片')
-        self.BandWidth_focus.clicked.connect(self.BandWidth_focus_plot)
+        self.BandWidth_focus = QPushButton('频域切片')
+        self.BandWidth_focus.clicked.connect(self.call_freq_slice)
         plot_right_layout.addWidget(self.BandWidth_focus, 0, 3)
 
         plot_right_layout.addWidget(QLabel("映射模式:"), 1, 0)
         self.mapping_combo = QComboBox()
         self.mapping_combo.addItems(["一 一对应", "交叉映射"])
-        plot_right_layout.addWidget(self.mapping_combo, 1, 1)
+        plot_right_layout.addWidget(self.mapping_combo, 1, 1, 1, 3)
 
-        plot_right_layout.addWidget(QLabel("数据模式:"), 2, 0)
-        self.data_mode_combo = QComboBox()
-        self.data_mode_combo.addItems([
-            "幅度 (dB)", "幅度 (abs)", "相位 (度)", "相位 (rad)",
-            "unwrap相位 (度)", "unwrap相位 (rad)", "群延迟 (fs)", "阻抗参数(mohm)", "导纳参数",
-            "Z电容 (pF)", "TDR (时域反射)"
-        ])
-        plot_right_layout.addWidget(self.data_mode_combo, 2, 1)
+        plot_right_layout.addWidget(QLabel("参数类型:"), 2, 0)
+        self.param_type_combo = QComboBox()
+        self.param_type_combo.addItems(['S参数', 'Y参数', 'Z参数', '时域'])
+        plot_right_layout.addWidget(self.param_type_combo, 2, 1, 1, 3)
+
+        plot_right_layout.addWidget(QLabel("数据切面:"), 3, 0)
+        self.facet_combo = QComboBox()
+        plot_right_layout.addWidget(self.facet_combo, 3, 1, 1, 3)
+
+        self._xlbl = QLabel("X轴:")
+        plot_right_layout.addWidget(self._xlbl, 4, 0)
+        self.xscale_combo = QComboBox()
+        self.xscale_combo.addItems(['线性', '对数'])
+        self.xscale_combo.setFixedWidth(60)
+        plot_right_layout.addWidget(self.xscale_combo, 4, 1)
+        self._ylbl = QLabel("Y轴:")
+        plot_right_layout.addWidget(self._ylbl, 4, 2)
+        self.yscale_combo = QComboBox()
+        self.yscale_combo.addItems(['线性', '对数'])
+        self.yscale_combo.setFixedWidth(60)
+        plot_right_layout.addWidget(self.yscale_combo, 4, 3)
+
+        # 时域专属参数（默认隐藏，选"时域"时显示）
+        self._td_tr_lbl = QLabel("t_rise (ps):")
+        self._td_tr_edit = QLineEdit("50")
+        self._td_tr_edit.setFixedWidth(65)
+        self._td_dt_lbl = QLabel("t_step (ps):")
+        self._td_dt_edit = QLineEdit("25")
+        self._td_dt_edit.setFixedWidth(65)
+        plot_right_layout.addWidget(self._td_tr_lbl,  6, 0)
+        plot_right_layout.addWidget(self._td_tr_edit, 6, 1)
+        plot_right_layout.addWidget(self._td_dt_lbl,  6, 2)
+        plot_right_layout.addWidget(self._td_dt_edit, 6, 3)
+
+        self._td_z0_lbl = QLabel("Z0 (Ω):")
+        self._td_z0_edit = QLineEdit("50")
+        self._td_z0_edit.setFixedWidth(65)
+        plot_right_layout.addWidget(self._td_z0_lbl,  7, 0)
+        plot_right_layout.addWidget(self._td_z0_edit, 7, 1)
+
+        self._xy_widgets = [self._xlbl, self.xscale_combo, self._ylbl, self.yscale_combo]
+        self._td_widgets = [self._td_tr_lbl, self._td_tr_edit,
+                            self._td_dt_lbl, self._td_dt_edit,
+                            self._td_z0_lbl, self._td_z0_edit]
+        for w in self._td_widgets:
+            w.setVisible(False)
 
         self.legend_checkbox = QCheckBox("显示图例")
         self.legend_checkbox.setChecked(True)
-        plot_right_layout.addWidget(self.legend_checkbox, 3, 0)
+        plot_right_layout.addWidget(self.legend_checkbox, 5, 0)
 
         self.same_plot_checkbox = QCheckBox("曲线叠加")
-        plot_right_layout.addWidget(self.same_plot_checkbox, 3, 1)
+        plot_right_layout.addWidget(self.same_plot_checkbox, 5, 1)
 
-        plot_right_layout.addWidget(QLabel("关注频点:"), 3, 2)
+        plot_right_layout.addWidget(QLabel("关注频点:"), 5, 2)
         self.freG_input = QLineEdit("")
         self.freG_input.setPlaceholderText("GHz")
-        plot_right_layout.addWidget(self.freG_input, 3, 3)
+        plot_right_layout.addWidget(self.freG_input, 5, 3)
+
+        # 初始化切面选项并连接信号
+        self._update_facet_options()
+        self.param_type_combo.currentIndexChanged.connect(self._update_facet_options)
+        self.facet_combo.currentIndexChanged.connect(self._update_default_scales)
 
         plot_layout.addLayout(plot_left_layout, stretch=2)
         plot_layout.addLayout(plot_right_layout, stretch=2)
@@ -334,8 +385,7 @@ class SParameterViewer_MainWin(QWidget):
         }
         """
         for btn in [self.open_button, self.save_button, self.diff_button,
-                    self.port_reduction_button, self.cascade_button,
-                    self.port_reorder_button, self.port_merge_button,
+                    self.port_management_button, self.cascade_button,
                     self.delete_button, self.analysis_btn, self.plot_button,
                     self.ripple_btn, self.td_analysis_btn, self.read_button]:
             btn.setStyleSheet(button_style)
@@ -551,56 +601,134 @@ class SParameterViewer_MainWin(QWidget):
         """
         print(info)
 
+    def _update_facet_options(self):
+        param_type = self.param_type_combo.currentText()
+        facets = _FACET_OPTIONS.get(param_type, [])
+        self.facet_combo.blockSignals(True)
+        self.facet_combo.clear()
+        self.facet_combo.addItems(facets)
+        self.facet_combo.blockSignals(False)
+        is_td = (param_type == '时域')
+        for w in self._xy_widgets:
+            w.setVisible(not is_td)
+        for w in self._td_widgets:
+            w.setVisible(is_td)
+        if is_td:
+            self._refresh_td_defaults()
+        self._update_default_scales()
+
+    def _refresh_td_defaults(self):
+        """根据当前选中文件自动设置 t_rise / t_step 的合理默认值。"""
+        from sparam_core import td_default_params
+        selected = [item.text() for item in self.file_list.selectedItems()]
+        if not selected:
+            selected = [self.file_list.item(i).text()
+                        for i in range(self.file_list.count())]
+        networks = [self.s_data[f] for f in selected if f in self.s_data]
+        if not networks:
+            return
+        try:
+            defs = [td_default_params(n) for n in networks]
+            tr = max(d['tr_ps'] for d in defs)
+            dt = max(d['dt_ps'] for d in defs)
+            self._td_tr_edit.setText(f'{tr:.2f}')
+            self._td_dt_edit.setText(f'{dt:.2f}')
+        except Exception:
+            pass
+
+    def _update_default_scales(self):
+        param_type = self.param_type_combo.currentText()
+        facet = self.facet_combo.currentText()
+        if param_type == '时域':
+            # Z0 仅对 TDR 有意义，其余模式置灰
+            is_tdr = (facet == 'TDR阻抗')
+            self._td_z0_lbl.setEnabled(is_tdr)
+            self._td_z0_edit.setEnabled(is_tdr)
+            return
+        xscale, yscale = _DEFAULT_SCALES.get((param_type, facet), ('线性', '线性'))
+        self.xscale_combo.setCurrentText(xscale)
+        self.yscale_combo.setCurrentText(yscale)
+
+    def get_current_plot_config(self):
+        return (self.param_type_combo.currentText(),
+                self.facet_combo.currentText(),
+                self.xscale_combo.currentText(),
+                self.yscale_combo.currentText())
+
     def _plot_single_curve(self, network, szy_params, p1, p2):
         num_port = network.number_of_ports
         if p1 > num_port or p2 > num_port:
             QMessageBox.warning(self, '端口错误',
                                 f'文件 {network.name} 的端口{p1}或{p2}超出范围！')
             return
-        data_mode = self.data_mode_combo.currentText()
-        param = szy_params[:, p1 - 1, p2 - 1]
+        param_type, facet, xscale, yscale = self.get_current_plot_config()
         freqG = network.frequency.f / 1e9
         label = f'{network.name}_S{p1},{p2}'
 
-        # TDR 使用时间轴，提前返回避免频率标注逻辑
-        if data_mode == "TDR (时域反射)":
-            result = compute_time_domain(network, p1, p2, "TDR")
+        # 时域：使用时间轴，提前返回
+        if param_type == '时域':
+            td_mode_map = {'TDR阻抗': 'TDR', '阶跃响应': 'step',
+                           '冲激响应': 'impulse', '脉冲响应': 'pulse'}
+            try:
+                _tr = float(self._td_tr_edit.text())
+            except ValueError:
+                _tr = None
+            try:
+                _dt = float(self._td_dt_edit.text())
+            except ValueError:
+                _dt = None
+            try:
+                _z0 = float(self._td_z0_edit.text())
+            except ValueError:
+                _z0 = 50.0
+            result = compute_time_domain(
+                network, p1, p2, td_mode_map.get(facet, 'TDR'),
+                tr_ps=_tr, dt_ps=_dt, z0=_z0
+            )
             x_td = result["time_ps"]
             y_td = result["y_data"]
-            lbl  = f'{network.name}_TDR_S{p1},{p2}'
+            lbl = f'{network.name}_{facet}_S{p1},{p2}'
             if self.legend_checkbox.isChecked():
                 line, = self.ax.plot(x_td, y_td, label=lbl, picker=5)
             else:
                 line, = self.ax.plot(x_td, y_td, picker=5)
             line.network_name = network.name
-            line.port_pair    = (p1, p2)
-            line.data_mode    = data_mode
-            line.freq_data    = x_td
-            line.value_data   = y_td
+            line.port_pair = (p1, p2)
+            line.data_mode = f'{param_type} {facet}'
+            line.freq_data = x_td
+            line.value_data = y_td
             return line
 
-        if data_mode == "幅度 (dB)":
+        param = szy_params[:, p1 - 1, p2 - 1]
+
+        if facet == '幅度(dB)':
             y_data = 20 * np.log10(np.abs(param))
-        elif data_mode in ("幅度 (abs)", "导纳参数"):
+        elif facet in ('幅度(abs)', '导纳(abs)'):
             y_data = np.abs(param)
-        elif data_mode == "阻抗参数(mohm)":
+        elif facet == '阻抗(mΩ)':
             y_data = 1000 * np.abs(param)
-        elif data_mode == "相位 (度)":
+        elif facet == '相位(度)':
             y_data = np.angle(param) * 180 / np.pi
-        elif data_mode == "相位 (rad)":
+        elif facet == '相位(rad)':
             y_data = np.angle(param)
-        elif data_mode == "unwrap相位 (度)":
+        elif facet == 'unwrap相位(度)':
             y_data = np.unwrap(np.angle(param)) * 180 / np.pi
-        elif data_mode == "unwrap相位 (rad)":
+        elif facet == 'unwrap相位(rad)':
             y_data = np.unwrap(np.angle(param))
-        elif data_mode == "群延迟 (fs)":
+        elif facet == '群延迟(fs)':
             phase = np.unwrap(np.angle(param))
             tau_g = -np.gradient(phase, freqG * 1e9) / (2 * np.pi)
-            y_data = tau_g * 1e12
-        elif data_mode == "Z电容 (pF)":
+            y_data = tau_g * 1e15
+        elif facet in ('实部', '实部(ESR)'):
+            y_data = np.real(param)
+        elif facet == '虚部':
+            y_data = np.imag(param)
+        elif facet == '电容(pF)':
             with np.errstate(divide='ignore', invalid='ignore'):
                 y_data = -1.0 / (2 * np.pi * freqG * 1e9 * np.imag(param)) * 1e12
             label = f'{network.name}_C{p1},{p2}'
+        else:
+            y_data = np.abs(param)
 
         if self.legend_checkbox.isChecked():
             line, = self.ax.plot(freqG, y_data, label=label, picker=5)
@@ -609,13 +737,12 @@ class SParameterViewer_MainWin(QWidget):
 
         line.network_name = network.name
         line.port_pair = (p1, p2)
-        line.data_mode = data_mode
+        line.data_mode = f'{param_type} {facet}'
         line.freq_data = freqG
         line.value_data = y_data
 
-        if data_mode in ("阻抗参数(mohm)", "导纳参数"):
-            self.ax.set_xscale('log')
-            self.ax.set_yscale('log')
+        self.ax.set_xscale('log' if xscale == '对数' else 'linear')
+        self.ax.set_yscale('log' if yscale == '对数' else 'linear')
 
         input_text = self.freG_input.text().split()
         mark_freqGs = list(map(float, input_text))
@@ -633,10 +760,10 @@ class SParameterViewer_MainWin(QWidget):
                     min_idx = np.argmin(band_data)
                     self.ax.plot(band_freqG[max_idx], band_data[max_idx], 'ro', markersize=5)
                     self.ax.plot(band_freqG[min_idx], band_data[min_idx], 'ro', markersize=5)
-                    print(f"S{p1},{p2} {data_mode} 信息提取--- \n"
+                    print(f"S{p1},{p2} {param_type} {facet} 信息提取---\n"
                           f"频率范围: {band_freqG[0]:.1f}-{band_freqG[-1]:.1f} GHz\n"
                           f"频率——max: {band_freqG[max_idx]:.3f}, min: {band_freqG[min_idx]:.3f}, end: {actual_freq:.3f}\n"
-                          f"数值——max: {band_data[max_idx]:.3f}; min: {band_data[min_idx]:.3f}, end: {actual_value:.3f} \n")
+                          f"数值——max: {band_data[max_idx]:.3f}; min: {band_data[min_idx]:.3f}, end: {actual_value:.3f}\n")
                 else:
                     print('关注频点超出现有的频率数据，无法进行数据统计')
         return line
@@ -669,13 +796,15 @@ class SParameterViewer_MainWin(QWidget):
         else:
             plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
         plt.rcParams['axes.unicode_minus'] = False
-        data_mode = self.data_mode_combo.currentText()
-        if data_mode == "TDR (时域反射)":
+        param_type, facet, _, _ = self.get_current_plot_config()
+        if param_type == '时域':
+            _td_ylabels = {'TDR阻抗': '阻抗 (Ω)', '阶跃响应': '阶跃响应',
+                           '冲激响应': 'h(t)', '脉冲响应': '脉冲响应'}
             self.ax.set_xlabel("时间 (ps)")
-            self.ax.set_ylabel("Impedance (Ω)")
+            self.ax.set_ylabel(_td_ylabels.get(facet, '时域'))
         else:
             self.ax.set_xlabel("频率 (GHz)")
-            self.ax.set_ylabel(data_mode)
+            self.ax.set_ylabel(f"{param_type} {facet}")
         self.ax.grid(True)
 
         self.loading = LoadingDialog(self)
@@ -698,9 +827,9 @@ class SParameterViewer_MainWin(QWidget):
                         print(f"{file_name}")
 
                         def _get_params(fname):
-                            if data_mode in ('阻抗参数(mohm)', 'Z电容 (pF)'):
+                            if param_type == 'Z参数':
                                 return self.get_z(fname)
-                            elif data_mode == '导纳参数':
+                            elif param_type == 'Y参数':
                                 return self.get_y(fname)
                             else:
                                 return self.get_s(fname)
@@ -721,7 +850,7 @@ class SParameterViewer_MainWin(QWidget):
                         show_error(self, f"处理文件 {file_name} 时出错: {str(e)}")
                         continue
 
-            if data_mode == 'Z电容 (pF)':
+            if facet == '电容(pF)':
                 self.ax.text(
                     0.01, 0.01,
                     r"$C = \frac{-1}{2\pi f \cdot \mathrm{Im}[Z_{ij}]}$  (pF)",
@@ -751,8 +880,93 @@ class SParameterViewer_MainWin(QWidget):
         except Exception as e:
             show_error(self, f"端口选择出错: {str(e)}")
 
-    def BandWidth_focus_plot(self):
-        print('该功能尚未开发')
+    def call_freq_slice(self):
+        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        port1 = self.port1_input.text().strip()
+        port2 = self.port2_input.text().strip()
+        if not selected_files or not port1 or not port2:
+            QMessageBox.warning(self, '输入错误', '请选择文件并在端口1/2栏输入端口！')
+            return
+        port1_list = parse_port_input(port1)
+        port2_list = parse_port_input(port2)
+        if port1_list is None or port2_list is None:
+            return
+
+        text, ok = QInputDialog.getText(self, '频域切片', '输入频率范围 (GHz)，如：1~5')
+        if not ok or not text.strip():
+            return
+        try:
+            parts = text.strip().replace('~', ' ').split()
+            f_min, f_max = float(parts[0]), float(parts[1])
+        except Exception:
+            QMessageBox.warning(self, '格式错误', '请输入如 "1~5" 的格式')
+            return
+
+        if sys.platform == 'win32':
+            plt.rcParams['font.sans-serif'] = ['SimHei']
+        else:
+            plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
+        plt.rcParams['axes.unicode_minus'] = False
+
+        for file_name in selected_files:
+            try:
+                network = self.get_network(file_name)
+                s = self.get_s(file_name)
+                freqG = network.f / 1e9
+                mask = (freqG >= f_min) & (freqG <= f_max)
+                freqG_sl = freqG[mask]
+                if freqG_sl.size == 0:
+                    print(f'{file_name}: 所选频率范围内无频点')
+                    continue
+
+                fig, axes = plt.subplots(2, 2, figsize=(10, 7))
+                fig.suptitle(f'{os.path.basename(file_name)}  [{f_min}~{f_max} GHz]')
+
+                pairs = (list(zip(port1_list, port2_list))
+                         if len(port1_list) == len(port2_list)
+                         else [(p1, p2) for p1 in port1_list for p2 in port2_list])
+
+                for p1, p2 in pairs:
+                    if p1 > network.nports or p2 > network.nports:
+                        continue
+                    param_sl = s[mask, p1 - 1, p2 - 1]
+                    lbl = f'S{p1},{p2}'
+                    axes[0, 0].plot(freqG_sl, 20 * np.log10(np.abs(param_sl)), label=lbl)
+                    axes[0, 1].plot(freqG_sl, np.angle(param_sl) * 180 / np.pi, label=lbl)
+                    axes[1, 0].plot(freqG_sl, np.real(param_sl), label=lbl)
+                    axes[1, 1].plot(freqG_sl, np.imag(param_sl), label=lbl)
+
+                titles = ['幅度 (dB)', '相位 (度)', '实部', '虚部']
+                ylabels = ['dB', '度', '', '']
+                for ax, title, ylabel in zip(axes.flat, titles, ylabels):
+                    ax.set_title(title)
+                    ax.set_ylabel(ylabel)
+                    ax.set_xlabel('频率 (GHz)')
+                    ax.grid(True)
+                    ax.legend()
+                plt.tight_layout()
+                plt.show()
+            except Exception as e:
+                show_error(self, f"频域切片出错 ({file_name}): {str(e)}")
+
+    def print_freq_axis(self):
+        selected_items = self.file_list.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, '错误', '请先选择文件！')
+            return
+        for item in selected_items:
+            try:
+                network = self.get_network(item.text())
+                freqs = network.f
+                print(f"\n=== {os.path.basename(item.text())} 频率轴 ===")
+                print(f"{'序号':>5}  {'频率(GHz)':>14}  {'间距(MHz)':>10}")
+                print("-" * 38)
+                for i, f in enumerate(freqs):
+                    spacing = (freqs[i] - freqs[i - 1]) / 1e6 if i > 0 else 0.0
+                    print(f"{i + 1:>5}  {f / 1e9:>14.6f}  {spacing:>10.3f}")
+                print(f"共 {len(freqs)} 个频点，范围 {freqs[0] / 1e9:.4f} ~ {freqs[-1] / 1e9:.4f} GHz")
+            except Exception as e:
+                show_error(self, f"打印频率轴出错: {str(e)}")
 
     def Basic_info_print(self):
         try:
@@ -999,6 +1213,65 @@ class SParameterViewer_MainWin(QWidget):
                     continue
         except Exception as e:
             show_error(self, f"操作执行出错: {str(e)}")
+
+    def call_port_management(self):
+        dialog = PortManagementDialog(self)
+        result = dialog.exec()
+        dispatch = {
+            1: self.call_edit_port_names,
+            2: self.call_edit_z0,
+            3: self.call_port_reorder,
+            4: self.call_port_merge,
+            5: self.call_port_reduction,
+        }
+        if result in dispatch:
+            dispatch[result]()
+
+    def call_edit_port_names(self):
+        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        if not selected_files:
+            QMessageBox.warning(self, '错误', '请先选择文件！')
+            return
+        if len(selected_files) > 1:
+            QMessageBox.information(self, "提示", "仅编辑第一个选中文件的端口名，其余文件不受影响")
+        file_name = selected_files[0]
+        network = self.get_network(file_name)
+        current_names = (network.port_names if network.port_names
+                         else [f"Port{i + 1}" for i in range(network.nports)])
+        prefill = "\n".join(current_names)
+        helper = PortNameDialog(self, network.nports, file_name)
+        new_names = helper._show_edit_dialog(prefill_text=prefill)
+        if new_names:
+            network.port_names = new_names
+            self.s_param.pop(file_name, None)
+            self.y_param.pop(file_name, None)
+            self.z_param.pop(file_name, None)
+            print(f"端口名称已更新（{file_name}）:")
+            for i, name in enumerate(new_names, 1):
+                print(f"  Port {i}: {name}")
+
+    def call_edit_z0(self):
+        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        if not selected_files:
+            QMessageBox.warning(self, '错误', '请先选择文件！')
+            return
+        if len(selected_files) > 1:
+            QMessageBox.information(self, "提示", "仅修改第一个选中文件的参考阻抗，其余文件不受影响")
+        file_name = selected_files[0]
+        network = self.get_network(file_name)
+        dialog = Z0EditDialog(self, network)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_z0 = dialog.get_z0_values()
+            if new_z0 is None:
+                return
+            for i, z0_val in enumerate(new_z0):
+                network.z0[:, i] = z0_val
+            self.s_param.pop(file_name, None)
+            self.y_param.pop(file_name, None)
+            self.z_param.pop(file_name, None)
+            print(f"参考阻抗已更新（{file_name}）:")
+            for i, z in enumerate(new_z0, 1):
+                print(f"  Port {i}: {z:.1f} Ω")
 
     def call_cascade(self):
         try:

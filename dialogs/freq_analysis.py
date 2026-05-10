@@ -22,6 +22,35 @@ from app_utils import show_error, resource_path, freq_band_data_extract
 from sparam_core import parse_port_input
 
 
+OPTION_META = {
+    'insertion_loss': ('插入损耗', 'dB'),
+    'return_loss': ('回波损耗', 'dB'),
+    'FarEnd_signal_crosstalk': ('远端信号串扰', 'dB'),
+    'NearEnd_signal_crosstalk': ('近端信号串扰', 'dB'),
+    'pn_skew': ('PN skew', 'fs'),
+    'pn_skew_dev': ('PN skew 波动', 'fs'),
+    'pn_mag_mismatch': ('PN 幅度失配', 'dB'),
+    'group_delay': ('群延迟', 'fs'),
+    'FarEnd_XTSum': ('远端串扰和', 'dB'),
+    'NearEnd_XTSum': ('近端串扰和', 'dB'),
+    'VTF_loss': ('VTF 损耗', 'dB'),
+    'VTF_XTSum': ('VTF 串扰和', 'dB'),
+}
+
+
+def option_display_name(option):
+    return OPTION_META.get(option, (option, ''))[0]
+
+
+def option_unit(option):
+    return OPTION_META.get(option, ('', ''))[1]
+
+
+def option_axis_label(option):
+    name, unit = OPTION_META.get(option, (option, ''))
+    return f"{name} ({unit})" if unit else name
+
+
 class frequencyAnalysisDialog(QDialog):
     def __init__(self, S_data, parent=None):
         super().__init__(parent)
@@ -238,7 +267,7 @@ class frequencyAnalysisDialog(QDialog):
     def create_frequency_input(self):
         self.frequency_input_group = QGroupBox("关注频点(GHz)")
         self.freG_input = QLineEdit("30")
-        self.freG_input.setPlaceholderText("输入频点，多个频点用逗号分隔，如: 1e9, 2e9, 3e9")
+        self.freG_input.setPlaceholderText("输入频点，多个频点用逗号分隔，如: 10, 20, 30")
         layout = QVBoxLayout()
         layout.addWidget(self.freG_input)
         self.frequency_input_group.setLayout(layout)
@@ -399,9 +428,9 @@ class frequencyAnalysisDialog(QDialog):
                     ax.axvline(x=freq, linestyle=':', color='gray', alpha=0.7)
 
                 # 设置图表属性
-                ax.set_title(f"{option} - bit {','.join(map(str, specified_lines))}比较")
+                ax.set_title(f"{option_display_name(option)} - bit {','.join(map(str, specified_lines))}比较")
                 ax.set_xlabel("Frequency (GHz)")
-                ax.set_ylabel(option)
+                ax.set_ylabel(option_axis_label(option))
                 ax.legend(loc='best')
                 ax.grid(True)
 
@@ -451,7 +480,7 @@ class frequencyAnalysisDialog(QDialog):
             elif plot_mode == "群延迟 (fs)":
                 phase = np.unwrap(np.angle(s_param))
                 tau_g = -np.gradient(phase, freqG * 1e9) / (2 * np.pi)
-                y_data = tau_g * 1e12  # fs
+                y_data = tau_g * 1e15  # fs
             else:
                 return None
 
@@ -719,9 +748,9 @@ class frequencyAnalysisDialog(QDialog):
                 for freq in mark_freqGs:
                     ax.axvline(x=freq, linestyle=':', color='gray', alpha=0.7)
 
-                ax.set_title(f"{option} - 最差曲线比较")
+                ax.set_title(f"{option_display_name(option)} - 最差曲线比较")
                 ax.set_xlabel("Frequency (GHz)")
-                ax.set_ylabel(option)
+                ax.set_ylabel(option_axis_label(option))
                 ax.grid(True)
                 ax.legend()  # 显示包含数据的图例
 
@@ -753,17 +782,6 @@ class frequencyAnalysisDialog(QDialog):
             bar_data = self.comparison_bar_data
             mark_freqGs = list(bar_data.keys())
             valid_options = list({d['option'] for data in bar_data.values() for d in data})
-            option_names = {
-                'insertion_loss': 'Insertion Loss',
-                'return_loss': 'Return Loss',
-                'FarEnd_signal_crosstalk': 'Far End XT',
-                'NearEnd_signal_crosstalk': 'Near End XT',
-                'FarEnd_XTSum': 'Far End XT Sum',
-                'NearEnd_XTSum': 'Near End XT Sum',
-                'VFT_loss': 'VFT loss',
-                'VTF_XTSum': 'VTF XT Sum'
-            }
-
             num_freqs = len(mark_freqGs)
             num_options = len(valid_options)
             fig, axes = plt.subplots(num_freqs, num_options, figsize=(5 * num_options, 3 * num_freqs), squeeze=False)
@@ -808,9 +826,8 @@ class frequencyAnalysisDialog(QDialog):
                                     ha='center', va='bottom', fontsize=10)
 
                     if freq_idx == 0:
-                        ax.set_title(option_names.get(option, option))
-                    if opt_idx == 0:
-                        ax.set_ylabel(f"0-{freq}GHz\n最差值")
+                        ax.set_title(option_display_name(option))
+                    ax.set_ylabel(f"0-{freq}GHz\n最差值 ({option_unit(option)})")
 
                     ax.set_xticks(x_pos)
                     ax.set_xticklabels([''] * len(file_names))
@@ -1170,7 +1187,7 @@ class frequencyAnalysisDialog(QDialog):
             else:
                 phase = np.unwrap(np.angle(s_param))
                 tau_g = -np.gradient(phase, freqG * 1e9) / (2 * np.pi)
-                y_data = tau_g * 1e12  # fs
+                y_data = tau_g * 1e15  # fs
 
             if mark_freqGs:
                 mark_info, worst_info = freq_band_data_extract(mark_freqGs, freqG, y_data, ax, worst_mode)
@@ -1190,7 +1207,7 @@ class frequencyAnalysisDialog(QDialog):
             ax.axvline(x=x_line, linestyle=':', alpha=1)
 
         self.file_result[self.option] = self.mode_result
-        ax.set_ylabel(self.option)
+        ax.set_ylabel(option_axis_label(self.option))
         ax.set_xlabel("frequency (GHz)")
         ax.grid(True)
 
@@ -1355,7 +1372,7 @@ class frequencyAnalysisDialog(QDialog):
 
         ax.set_title(network.name)
         ax.set_xlabel("frequency (GHz)")
-        ax.set_ylabel(f'{end_mode}_{sum_mode}Sum')
+        ax.set_ylabel(option_axis_label(self.option))
         ax.grid(True)
         legend = ax.legend()
         for text in legend.get_texts():
