@@ -321,7 +321,7 @@ class TimeDomainDialog(QDialog):
     def _fill_port_by_name(self):
         try:
             parent = self.parent()
-            file_list = [item.text() for item in parent.file_list.selectedItems()]
+            file_list = parent.get_selected_file_keys()
             ports = check_and_set_port_names(parent, file_list)
             if ports:
                 self._port2_edit.setText(" ".join(map(str, ports)))
@@ -331,7 +331,7 @@ class TimeDomainDialog(QDialog):
     def _add_port_pairs(self):
         try:
             parent = self.parent()
-            selected_files = [item.text() for item in parent.file_list.selectedItems()]
+            selected_files = parent.get_selected_file_keys()
             if not selected_files:
                 QMessageBox.warning(self, "提示", "请先在主窗口中选择 S 参数文件")
                 return
@@ -437,9 +437,11 @@ class TimeDomainDialog(QDialog):
                 loading.set_message(f"计算: {key}")
                 QApplication.processEvents()
 
-                network = self.s_data.get(info["file"])
-                if network is None:
-                    print(f"[时域分析] 未找到网络: {info['file']}")
+                parent = self.parent()
+                network = parent.get_network(info["file"])
+                s_params = parent.get_param_matrix(info["file"], "S参数")
+                if network is None or s_params is None:
+                    print(f"[时域分析] 未找到网络或S参数: {info['file']}")
                     continue
 
                 port_idx = info["p1"] - 1
@@ -453,7 +455,7 @@ class TimeDomainDialog(QDialog):
                     waveform=info["waveform"],
                     tr_ps=tr, dt_ps=dt, n_points=n,
                     z0=z0, pulse_width_ps=pw_ps,
-                    window_type=window_type
+                    window_type=window_type, s_params=s_params
                 )
 
                 x = result["time_ps"] / 1000 if unit == "ns" else result["time_ps"]

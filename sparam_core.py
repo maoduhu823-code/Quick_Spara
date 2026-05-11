@@ -277,7 +277,8 @@ def SE2diff_port(
 
 # === 纹波分析 ===
 
-def ripple_calc(network, p1, p2, start_freqG, stop_freqG, data_mode, method, fit_params):
+def ripple_calc(network, p1, p2, start_freqG, stop_freqG, data_mode, method, fit_params,
+                s_params=None):
     """
     计算S参数纹波。
     fit_params 根据 method 不同包含:
@@ -285,7 +286,8 @@ def ripple_calc(network, p1, p2, start_freqG, stop_freqG, data_mode, method, fit
         "平滑函数":  {'window_length': 窗长度, 'polyorder': 阶数}
         "IEEE_std_802.3-2022": {}
     """
-    s_params = network.s
+    if s_params is None:
+        s_params = network.s
     freqG = network.f / 1e9
     file_name = network.name
     s_param = s_params[:, p1 - 1, p2 - 1]
@@ -418,7 +420,8 @@ def _ieee_8023_fit(freqG, s_param_db):
 
 def merge_ports_multi(ntw: rf.Network,
                       merge_groups: list,
-                      z0_list: list) -> rf.Network:
+                      z0_list: list,
+                      y_orig: np.ndarray = None) -> rf.Network:
     """
     将 ntw 中多个端口组分别并联合并为单个端口，返回新网络。
 
@@ -437,7 +440,8 @@ def merge_ports_multi(ntw: rf.Network,
     ng         = len(merge_groups)
     n_new      = nk + ng
 
-    y_orig = ntw.y                                          # (nf, n, n)
+    if y_orig is None:
+        y_orig = ntw.y                                      # (nf, n, n)
     y_new  = np.zeros((nf, n_new, n_new), dtype=complex)
 
     # keep × keep
@@ -590,7 +594,8 @@ def compute_time_domain(network: rf.Network, p1: int, p2: int,
                         tr_ps: float = None, dt_ps: float = None,
                         n_points: int = None, z0: float = 50.0,
                         pulse_width_ps: float = None,
-                        window_type: str = "gaussian") -> dict:
+                        window_type: str = "gaussian",
+                        s_params: np.ndarray = None) -> dict:
     """
     计算时域波形。
 
@@ -600,7 +605,9 @@ def compute_time_domain(network: rf.Network, p1: int, p2: int,
     """
     # 原始 S 参数（先取频率轴，用于推导 n_points）
     freq_orig = network.f
-    s_orig    = network.s[:, p1 - 1, p2 - 1]
+    if s_params is None:
+        s_params = network.s
+    s_orig    = s_params[:, p1 - 1, p2 - 1]
     df_Hz     = (freq_orig[-1] - freq_orig[0]) / (len(freq_orig) - 1)
 
     defaults = td_default_params(network)

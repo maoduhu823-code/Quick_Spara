@@ -272,10 +272,15 @@ class frequencyAnalysisDialog(QDialog):
         layout.addWidget(self.freG_input)
         self.frequency_input_group.setLayout(layout)
 
+    def _get_s_params(self, file_name, network):
+        if self.parent and hasattr(self.parent, "get_param_matrix"):
+            return self.parent.get_param_matrix(file_name, "S参数")
+        return network.s
+
     def generate_specific_line_waveforms(self):
         """将所有S参数文件中用户指定的bit波形绘制在同一张图中"""
         try:
-            self.s_params_files = [item.text() for item in self.parent.file_list.selectedItems()]
+            self.s_params_files = self.parent.get_selected_file_keys()
             if not self.s_params_files:
                 QMessageBox.warning(self, '错误', '请先选择需要进行频域分析的S参数文件！')
                 return
@@ -460,7 +465,7 @@ class frequencyAnalysisDialog(QDialog):
     def plot_s_curve_specific(self, network, port_group, option, ax, file_name, line_num, mark_freqGs,
                               plot_mode="幅度 (dB)", worst_mode="max"):
         """绘制指定线号的S参数曲线"""
-        s_params = network.s
+        s_params = self._get_s_params(file_name, network)
         freqG = network.frequency.f / 1e9
         results = []  # 用于存储所有端口对的结果
 
@@ -523,7 +528,7 @@ class frequencyAnalysisDialog(QDialog):
             }
     def plot_xtsum_specific(self, network, port_pairs, option, ax, file_name, line_num, mark_freqGs):
         """绘制指定线号的串扰和曲线"""
-        s_params = network.s
+        s_params = self._get_s_params(file_name, network)
         freqG = network.frequency.f / 1e9
         num_port = network.nports
 
@@ -591,7 +596,7 @@ class frequencyAnalysisDialog(QDialog):
 
     def plot_pn_mismatch_specific(self, network, port_pairs, option, ax, file_name, line_num, mark_freqGs):
         """绘制指定差分对的PN不匹配曲线"""
-        s_params = network.s
+        s_params = self._get_s_params(file_name, network)
         freqG = network.frequency.f / 1e9
         freq = network.frequency.f
 
@@ -648,7 +653,7 @@ class frequencyAnalysisDialog(QDialog):
         """生成最差曲线比较图，并确保数据打印和legend格式统一"""
         try:
             # 获取用户选择
-            self.s_params_files = [item.text() for item in self.parent.file_list.selectedItems()]
+            self.s_params_files = self.parent.get_selected_file_keys()
             if not self.s_params_files:
                 QMessageBox.warning(self, '错误', '请先选择需要进行频域分析的S参数文件！')
                 return
@@ -702,7 +707,7 @@ class frequencyAnalysisDialog(QDialog):
                         port_pairs.reverse()
 
                     # 获取最差曲线数据(曲线绘图数据也是从这里来）
-                    worst_data = self.get_worst_bit_data(network, option, port_pairs, mark_freqGs)
+                    worst_data = self.get_worst_bit_data(file_path, network, option, port_pairs, mark_freqGs)
                     # print(worst_data)
                     if not worst_data:
                         continue
@@ -846,16 +851,16 @@ class frequencyAnalysisDialog(QDialog):
         except Exception as e:
             show_error(self, f"生成横向比较柱状图时出错: {str(e)}")
 
-    def get_worst_bit_data(self, network, option, port_pairs, mark_freqGs):
+    def get_worst_bit_data(self, file_name, network, option, port_pairs, mark_freqGs):
         """获取指定文件和分析项目的最差bit数据（以目标频点以下频段内的最差点为准）"""
         try:
-            s_params = network.s
+            s_params = self._get_s_params(file_name, network)
             freqG = network.frequency.f / 1e9
             num_port = network.nports
 
             # 处理串扰和指标
             if option in ['FarEnd_XTSum', 'NearEnd_XTSum', "VTF_XTSum"]:
-                return self.get_xtsum_worst_data(network, option, port_pairs, mark_freqGs)
+                return self.get_xtsum_worst_data(file_name, network, option, port_pairs, mark_freqGs)
 
             worst_bit = None
             worst_value = -np.inf if option not in ['insertion_loss', 'VTF_loss'] else np.inf  # 插入损耗越小越差
@@ -960,10 +965,10 @@ class frequencyAnalysisDialog(QDialog):
             show_error(self, f"获取最差bit数据时出错: {str(e)}")
             return None
 
-    def get_xtsum_worst_data(self, network, option, port_pairs, mark_freqGs):
+    def get_xtsum_worst_data(self, file_name, network, option, port_pairs, mark_freqGs):
         """获取串扰和的最差数据（以目标频点以下频段内的最差点为准）"""
         try:
-            s_params = network.s
+            s_params = self._get_s_params(file_name, network)
             freqG = network.frequency.f / 1e9
             num_port = network.nports
 
@@ -1055,7 +1060,7 @@ class frequencyAnalysisDialog(QDialog):
 
     def generate_plots(self):
         # 获取用户选择
-        self.s_params_files = [item.text() for item in self.parent.file_list.selectedItems()]
+        self.s_params_files = self.parent.get_selected_file_keys()
         if not self.s_params_files:
             QMessageBox.warning(self, '错误', '请先选择需要进行频域分析的S参数文件！')
             return
@@ -1089,12 +1094,12 @@ class frequencyAnalysisDialog(QDialog):
                         port1_group = port_pairs[1]
                         port2_group = port_pairs[0]
                         port_group = [port1_group, port2_group]
-                        self.plot_s_curve(network, port_group, plot_mode, worst_mode="min")
+                        self.plot_s_curve(file2plot, network, port_group, plot_mode, worst_mode="min")
                     elif self.option == 'return_loss':
                         port1_group = port_pairs[0]
                         port2_group = port_pairs[0]
                         port_group = [port1_group, port2_group]
-                        self.plot_s_curve(network, port_group)
+                        self.plot_s_curve(file2plot, network, port_group)
                     elif self.option == 'FarEnd_signal_crosstalk':
                         port1_group = []
                         port2_group = []
@@ -1107,7 +1112,7 @@ class frequencyAnalysisDialog(QDialog):
                                     port1_group.append(p1)
                                     port2_group.append(p2)
                         port_group = [port1_group, port2_group]
-                        self.plot_s_curve(network, port_group)
+                        self.plot_s_curve(file2plot, network, port_group)
                     elif self.option == 'NearEnd_signal_crosstalk':
                         port1_group = []
                         port2_group = []
@@ -1120,29 +1125,29 @@ class frequencyAnalysisDialog(QDialog):
                                     port1_group.append(p1)
                                     port2_group.append(p2)
                         port_group = [port1_group, port2_group]
-                        self.plot_s_curve(network, port_group)
+                        self.plot_s_curve(file2plot, network, port_group)
                     elif self.option == 'group_delay':
                         plot_mode = "群延迟 (fs)"
                         port1_group = port_pairs[1]
                         port2_group = port_pairs[0]
                         port_group = [port1_group, port2_group]
-                        self.plot_s_curve(network, port_group, plot_mode)
+                        self.plot_s_curve(file2plot, network, port_group, plot_mode)
                     elif self.option == 'pn_skew':
                         plot_mode = "PN_skew (fs)"
-                        self.plot_pn_mismatch(network, port_pairs, plot_mode)
+                        self.plot_pn_mismatch(file2plot, network, port_pairs, plot_mode)
                     elif self.option == 'pn_skew_dev':
                         # 确认公式
                         plot_mode = "PN_skew_dev (fs)"
-                        self.plot_pn_mismatch(network, port_pairs, plot_mode)
+                        self.plot_pn_mismatch(file2plot, network, port_pairs, plot_mode)
                     elif self.option == 'pn_mag_mismatch':
                         plot_mode = "PN_Magnitude_Mismatch (dB)"
-                        self.plot_pn_mismatch(network, port_pairs, plot_mode)
+                        self.plot_pn_mismatch(file2plot, network, port_pairs, plot_mode)
                     elif self.option in ["FarEnd_XTSum", "VTF_XTSum"]:
                         end_mode = "Far_end"
-                        self.plot_s_xtsum(network, port_pairs, end_mode)
+                        self.plot_s_xtsum(file2plot, network, port_pairs, end_mode)
                     elif self.option == 'NearEnd_XTSum':
                         end_mode = "Near_end"
-                        self.plot_s_xtsum(network, port_pairs, end_mode)
+                        self.plot_s_xtsum(file2plot, network, port_pairs, end_mode)
 
                 self.all_results[file2plot] = self.file_result
             except:
@@ -1151,7 +1156,7 @@ class frequencyAnalysisDialog(QDialog):
         self.print_results()
         print("✅ Figures plot and Tables print finished")
 
-    def plot_s_curve(self, network, port_group, plot_mode="幅度 (dB)", worst_mode="max"):
+    def plot_s_curve(self, file_name, network, port_group, plot_mode="幅度 (dB)", worst_mode="max"):
         fig, ax = plt.subplots()
         fig_id = self.current_fig_id
         self.current_fig_id += 1
@@ -1163,7 +1168,7 @@ class frequencyAnalysisDialog(QDialog):
             "cids": []
         }
 
-        s_params = network.s
+        s_params = self._get_s_params(file_name, network)
         freqG = network.frequency.f / 1e9
         input = self.freG_input.text()
         mark_freqGs = parse_port_input(input, type="freq")
@@ -1224,8 +1229,8 @@ class frequencyAnalysisDialog(QDialog):
 
         fig.show()
 
-    def plot_pn_mismatch(self, network, port_pairs, plot_mode):
-        s_params = network.s
+    def plot_pn_mismatch(self, file_name, network, port_pairs, plot_mode):
+        s_params = self._get_s_params(file_name, network)
         num_port = network.nports
         if num_port % 4 != 0:
             QMessageBox.warning(self, '端口错误', '端口数非4的倍数，请确认是否为差分线的单端S参数')
@@ -1305,7 +1310,7 @@ class frequencyAnalysisDialog(QDialog):
         fig.show()
         self.file_result[self.option] = self.mode_result
 
-    def plot_s_xtsum(self, network, port_pairs, end_mode):
+    def plot_s_xtsum(self, file_name, network, port_pairs, end_mode):
         if self.power_radio.isChecked():
             sum_mode = "Power"
         elif self.modulo_radio.isChecked():
@@ -1314,7 +1319,7 @@ class frequencyAnalysisDialog(QDialog):
             sum_mode = "Amplitude_Vector"
 
         freqG = network.frequency.f / 1e9
-        s_params = network.s
+        s_params = self._get_s_params(file_name, network)
         num_port = network.nports
         input = self.freG_input.text()
         mark_freqGs = parse_port_input(input, type="freq")
@@ -1502,7 +1507,7 @@ class frequencyAnalysisDialog(QDialog):
         """
         try:
             # 获取用户选择
-            self.s_params_files = [item.text() for item in self.parent.file_list.selectedItems()]
+            self.s_params_files = self.parent.get_selected_file_keys()
             if not self.s_params_files:
                 QMessageBox.warning(self, '错误', '请先选择需要进行频域分析的S参数文件！')
                 return

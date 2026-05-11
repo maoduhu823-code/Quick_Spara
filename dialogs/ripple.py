@@ -162,13 +162,14 @@ class RippleFitDialog(QDialog):
             for file_name in self.selected_files:
                 try:
                     network = parent.get_network(file_name)
+                    s_params = parent.get_param_matrix(file_name, "S参数")
                     for p1, p2 in zip(port1_list, port2_list):
-                        if max(p1, p2) > network.s.shape[1]:
+                        if s_params is None or max(p1, p2) > s_params.shape[1]:
                             QMessageBox.warning(self, '端口错误',
                                                 f'文件 {file_name} 的端口数不足！')
                             continue
                         result = ripple_calc(network, p1, p2, start_freq, stop_freq,
-                                             data_mode, method, fit_params)
+                                             data_mode, method, fit_params, s_params=s_params)
                         results_data.append(result)
                         results_text.append(
                             f"{result['label']}: ripple = {result['max_ripple']:.4f}")

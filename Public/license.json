@@ -1,0 +1,7 @@
+{
+  "app": "Quick_Sparam",
+  "global_enabled": true,
+  "default_expire_at": "2026-08-01 23:59:59",
+  "users": [],
+  "message": "默认试用授权文件。管理员可修改 default_expire_at 或 users 列表进行延期。"
+}

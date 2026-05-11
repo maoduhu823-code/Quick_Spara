@@ -11,7 +11,7 @@ from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QListWidget, QLabel, QLineEdit, QMessageBox,
-    QComboBox, QGroupBox, QCheckBox, QGridLayout,
+    QComboBox, QGroupBox, QCheckBox, QGridLayout, QListWidgetItem,
     QTextEdit, QDialog, QInputDialog
 )
 from PyQt6.QtCore import Qt
@@ -23,6 +23,8 @@ from sparam_core import (enforce_nonzero_impedance, enforce_nonzero_z0,
                          SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,
                          merge_ports_multi, compute_time_domain)
 from app_utils import show_error, check_and_set_port_names
+from trial_manager import check_trial_permission
+from version_manager import APP_VERSION
 from dialogs.cascade import CascadeDialog
 from dialogs.freq_analysis import frequencyAnalysisDialog
 from dialogs.se2diff import DiffConversionDialog
@@ -63,50 +65,178 @@ class SParameterViewer_MainWin(QWidget):
         self.s_param = {}
         self.y_param = {}
         self.z_param = {}
+        self.file_fingerprints = {}
         self.loading = LoadingDialog(self)
 
     # ===== 数据缓存方法 =====
 
+    def _is_cache_debug_enabled(self):
+        return (hasattr(self, 'cache_debug_checkbox') and
+                self.cache_debug_checkbox.isChecked())
+
+    def _cache_debug(self, message):
+        if self._is_cache_debug_enabled():
+            print(message)
+
+    def _file_fingerprint(self, file_name):
+        """返回磁盘文件指纹；内存生成的Network没有指纹。"""
+        if not isinstance(file_name, str) or not os.path.isfile(file_name):
+            return None
+        try:
+            stat = os.stat(file_name)
+            return (os.path.abspath(file_name), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return None
+
     def get_network(self, file_name):
         """从缓存获取或加载网络对象"""
+        fingerprint = self._file_fingerprint(file_name)
+        cached_fingerprint = self.file_fingerprints.get(file_name)
+        if (file_name in self.s_data and fingerprint is not None and
+                cached_fingerprint is not None and fingerprint != cached_fingerprint):
+            self._cache_debug(f"[cache] Network stale: {file_name}，磁盘文件已变化，重新读取")
+            self.invalidate_file_cache(file_name, include_network=True)
+
         if file_name not in self.s_data:
+            self._cache_debug(f"[cache] Network miss: {file_name}")
             self.s_data[file_name] = rf.Network(file_name)
             enforce_nonzero_z0(self.s_data[file_name], file_name)
+            self.file_fingerprints[file_name] = fingerprint
+        else:
+            self._cache_debug(f"[cache] Network hit: {file_name}")
         return self.s_data[file_name]
+
+    def register_network(self, file_name, network):
+        """注册内存生成的Network，并清理同名旧参数缓存。"""
+        self.invalidate_file_cache(file_name, include_network=True)
+        self.s_data[file_name] = network
+        self.file_fingerprints[file_name] = None
+        self._cache_debug(f"[cache] Network register: {file_name}")
+
+    def _validate_cached_param(self, file_name, param_type, cached_matrix):
+        """调试模式下校验缓存和当前Network是否一致。"""
+        if not self._is_cache_debug_enabled() or param_type != 'S参数':
+            return True
+        try:
+            live_matrix = self.s_data[file_name].s
+            same_shape = cached_matrix.shape == live_matrix.shape
+            same_data = same_shape and np.allclose(
+                cached_matrix, live_matrix, rtol=1e-9, atol=1e-12,
+                equal_nan=True
+            )
+            if not same_data:
+                self._cache_debug(f"[cache] S参数缓存不一致，已丢弃: {file_name}")
+                return False
+        except Exception as e:
+            self._cache_debug(f"[cache] S参数缓存校验失败，已丢弃: {file_name} ({e})")
+            return False
+        return True
+
+    def get_param_matrix(self, file_name, param_type):
+        """统一获取S/Y/Z矩阵，所有模块共享同一套懒加载缓存。"""
+        network = self.get_network(file_name)
+        cache_map = {
+            'S参数': self.s_param,
+            'Y参数': self.y_param,
+            'Z参数': self.z_param,
+        }
+        attr_map = {
+            'S参数': 's',
+            'Y参数': 'y',
+            'Z参数': 'z',
+        }
+        if param_type not in cache_map:
+            raise ValueError(f"未知参数类型: {param_type}")
+
+        cache = cache_map[param_type]
+        if file_name in cache:
+            if self._validate_cached_param(file_name, param_type, cache[file_name]):
+                self._cache_debug(
+                    f"[cache] {param_type} hit: {file_name}, shape={cache[file_name].shape}"
+                )
+                return cache[file_name]
+            cache.pop(file_name, None)
+
+        try:
+            cache[file_name] = getattr(network, attr_map[param_type])
+            self._cache_debug(
+                f"[cache] {param_type} miss: {file_name}, shape={cache[file_name].shape}"
+            )
+        except Exception as e:
+            QMessageBox.warning(self, '加载错误',
+                                f"无法读取 {file_name}的{param_type}:\n{str(e)}")
+            return None
+        return cache[file_name]
 
     def get_s(self, file_name):
         """从缓存获取S参数矩阵"""
-        if file_name not in self.s_param:
-            try:
-                self.s_param[file_name] = self.s_data[file_name].s
-            except Exception as e:
-                QMessageBox.warning(self, '加载错误', f"无法读取 {file_name}的S参数:\n{str(e)}")
-                return None
-        return self.s_param[file_name]
+        return self.get_param_matrix(file_name, 'S参数')
 
     def get_z(self, file_name):
         """从缓存获取Z参数矩阵"""
-        if file_name not in self.z_param:
-            try:
-                self.z_param[file_name] = self.s_data[file_name].z
-            except Exception as e:
-                QMessageBox.warning(self, '加载错误', f"无法读取 {file_name}的Z参数:\n{str(e)}")
-                return None
-        return self.z_param[file_name]
+        return self.get_param_matrix(file_name, 'Z参数')
 
     def get_y(self, file_name):
         """从缓存获取Y参数矩阵"""
-        if file_name not in self.y_param:
-            try:
-                self.y_param[file_name] = self.s_data[file_name].y
-            except Exception as e:
-                QMessageBox.warning(self, '加载错误', f"无法读取 {file_name}的Y参数:\n{str(e)}")
-                return None
-        return self.y_param[file_name]
+        return self.get_param_matrix(file_name, 'Y参数')
+
+    # ===== 文件列表显示/取值方法 =====
+
+    def get_file_key_from_item(self, item):
+        """获取文件列表项对应的真实缓存key，避免显示文本影响数据访问"""
+        return item.data(Qt.ItemDataRole.UserRole) or item.text()
+
+    def get_selected_file_keys(self):
+        return [self.get_file_key_from_item(item) for item in self.file_list.selectedItems()]
+
+    def get_all_file_keys(self):
+        return [self.get_file_key_from_item(self.file_list.item(i))
+                for i in range(self.file_list.count())]
+
+    def _format_file_display(self, file_key):
+        if self.file_display_combo.currentText() == "文件名":
+            return os.path.basename(file_key)
+        return file_key
+
+    def _update_file_item_display(self, item):
+        file_key = self.get_file_key_from_item(item)
+        item.setText(self._format_file_display(file_key))
+        item.setToolTip(file_key)
+
+    def add_file_list_item(self, file_key):
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, file_key)
+        self.file_list.addItem(item)
+        self._update_file_item_display(item)
+        return item
+
+    def refresh_file_list_display(self):
+        for i in range(self.file_list.count()):
+            self._update_file_item_display(self.file_list.item(i))
+
+    def invalidate_file_cache(self, file_name, include_network=False):
+        """清理单个文件的派生参数缓存；必要时同时移除Network对象"""
+        self.s_param.pop(file_name, None)
+        self.y_param.pop(file_name, None)
+        self.z_param.pop(file_name, None)
+        if include_network:
+            self.s_data.pop(file_name, None)
+            self.file_fingerprints.pop(file_name, None)
+        self._cache_debug(
+            f"[cache] invalidate: {file_name}, include_network={include_network}"
+        )
+
+    def clear_all_cache(self):
+        self.s_data.clear()
+        self.s_param.clear()
+        self.y_param.clear()
+        self.z_param.clear()
+        self.file_fingerprints.clear()
+        self._cache_debug("[cache] clear all")
 
     def add_unique_filename(self, new_file_name):
         """向文件列表添加不重复的文件名，冲突时自动加数字后缀"""
-        existing_names = {self.file_list.item(i).text() for i in range(self.file_list.count())}
+        existing_names = set(self.get_all_file_keys())
         base_name = new_file_name
         suffix = 1
         while new_file_name in existing_names:
@@ -116,13 +246,13 @@ class SParameterViewer_MainWin(QWidget):
             else:
                 new_file_name = f"{base_name}_{suffix}"
             suffix += 1
-        self.file_list.addItem(new_file_name)
+        self.add_file_list_item(new_file_name)
         return new_file_name
 
     # ===== UI 构建 =====
 
     def initUI(self):
-        self.version_num = 'B2026.1'
+        self.version_num = APP_VERSION
         self.setWindowTitle(f'Quick_Sparam_{self.version_num} 封装SIPI开发部'
                             ' --- 本工具免费提供给其他组织使用，但对出现的问题、结果等概不负责')
         self.setGeometry(100, 100, 1500, 700)
@@ -209,6 +339,16 @@ class SParameterViewer_MainWin(QWidget):
 
         file_group = QGroupBox("S参数文件列表")
         file_layout = QVBoxLayout()
+        file_display_layout = QHBoxLayout()
+        file_display_layout.addWidget(QLabel("显示模式:"))
+        self.file_display_combo = QComboBox()
+        self.file_display_combo.addItems(["完整路径/文件名", "文件名"])
+        self.file_display_combo.currentTextChanged.connect(self.refresh_file_list_display)
+        file_display_layout.addWidget(self.file_display_combo)
+        self.cache_debug_checkbox = QCheckBox("缓存调试")
+        file_display_layout.addWidget(self.cache_debug_checkbox)
+        file_display_layout.addStretch()
+        file_layout.addLayout(file_display_layout)
         self.file_list = QListWidget()
         self.file_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.file_list.setMinimumWidth(400)
@@ -409,13 +549,7 @@ class SParameterViewer_MainWin(QWidget):
         self.output_console.ensureCursorVisible()
 
     def check_beta_period(self):
-        beta_end_date = datetime(2026, 6, 30)
-        if datetime.now() > beta_end_date:
-            QMessageBox.critical(self, "内测结束",
-                                 "内测已结束，请联系管理员获取公测版本。",
-                                 QMessageBox.StandardButton.Ok)
-            return False
-        return True
+        return check_trial_permission(parent=self)
 
     def closeEvent(self, event):
         self.on_app_closing()
@@ -457,7 +591,7 @@ class SParameterViewer_MainWin(QWidget):
 
     def clear_cache_data(self):
         self.file_list.clear()
-        self.s_data.clear()
+        self.clear_all_cache()
 
     def save_output_to_file(self):
         output_text = self.output_console.toPlainText()
@@ -481,15 +615,18 @@ class SParameterViewer_MainWin(QWidget):
         print("B2026版主要更新内容如下：")
         items = [
             "---功能增加",
-            "【频域分析】   功能中加入指定bit、最差bit的频域结果查看和比对",
-            "【频域分析】   新增了VTF loss/crosstalk的数据类型",
-            "【端口缩并】   新增了Cio端接的功能",
+            "【试用权限】   新增基于Public/license.json的绝对日期限用与共享路径延期机制",
+            "【版本管理】   新增基于Public/version.json的版本检查，主界面显示后自动提醒更新",
+            "【文件列表】   新增完整路径/文件名显示模式切换，长路径文件可简化显示",
+            "【缓存管理】   新增S/Y/Z参数统一懒加载缓存、文件指纹校验和缓存调试开关",
+            "【数据复用】   频域分析、时域分析、纹波拟合和端口合并统一复用主窗口缓存数据",
             "---交互体验",
-            "【文件列表】   改为更为常用的Ctrl/Shift+点击的交互模式",
-            "【端口重排】   支持端口批量选中、拖拽实现顺序调整",
-            "【频域分析】   修复保存excel时文件名的长度限制",
-            "【参数级联】   修复了特定级联后S参数保存的bug",
-            "【参数读取】   HFSS生成的频变阻抗信息的S参数会导致报错，端口阻抗统一修复为标量阻抗",
+            "【版本信息】   当前版本号统一为2026.03，启动和“版本信息”按钮显示同一份更新说明",
+            "【文件列表】   显示文件名时仍保留真实文件路径，避免后续分析找不到原始文件",
+            "【频域分析】   修复文件名显示模式下指定线号、最差bit和XTSum等分析的数据访问问题",
+            "【时域分析】   修复文件名显示模式下端口选择与时域计算找不到网络数据的问题",
+            "【端口合并】   优化端口合并的Y参数读取流程，减少重复计算并保持缓存一致",
+            "【权限/更新】  共享授权和版本文件不可访问或格式异常时静默回退，不影响未过期用户启动",
         ]
         for text in items:
             print(f"{text}")
@@ -501,10 +638,10 @@ class SParameterViewer_MainWin(QWidget):
         )
         if file_names:
             for file_name in file_names:
-                self.file_list.addItem(file_name)
+                self.add_file_list_item(file_name)
 
     def read_snp_file(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         for file in selected_files:
             if sys.platform == 'win32':
                 subprocess.Popen(['notepad.exe', file])
@@ -524,7 +661,7 @@ class SParameterViewer_MainWin(QWidget):
         success_count = 0
         for item in selected_items:
             try:
-                file_path = item.text()
+                file_path = self.get_file_key_from_item(item)
                 network = self.get_network(file_path)
                 file_name = os.path.basename(file_path)
                 save_path = os.path.join(save_dir, file_name)
@@ -564,10 +701,9 @@ class SParameterViewer_MainWin(QWidget):
         if not selected_items:
             return
         for item in selected_items:
-            file_name = item.text()
+            file_name = self.get_file_key_from_item(item)
             self.file_list.takeItem(self.file_list.row(item))
-            if file_name in self.s_data:
-                del self.s_data[file_name]
+            self.invalidate_file_cache(file_name, include_network=True)
 
     def on_curve_click(self, event):
         if event.artist not in self.plot_lines:
@@ -620,10 +756,9 @@ class SParameterViewer_MainWin(QWidget):
     def _refresh_td_defaults(self):
         """根据当前选中文件自动设置 t_rise / t_step 的合理默认值。"""
         from sparam_core import td_default_params
-        selected = [item.text() for item in self.file_list.selectedItems()]
+        selected = self.get_selected_file_keys()
         if not selected:
-            selected = [self.file_list.item(i).text()
-                        for i in range(self.file_list.count())]
+            selected = self.get_all_file_keys()
         networks = [self.s_data[f] for f in selected if f in self.s_data]
         if not networks:
             return
@@ -655,7 +790,7 @@ class SParameterViewer_MainWin(QWidget):
                 self.xscale_combo.currentText(),
                 self.yscale_combo.currentText())
 
-    def _plot_single_curve(self, network, szy_params, p1, p2):
+    def _plot_single_curve(self, file_name, network, szy_params, p1, p2):
         num_port = network.number_of_ports
         if p1 > num_port or p2 > num_port:
             QMessageBox.warning(self, '端口错误',
@@ -683,7 +818,8 @@ class SParameterViewer_MainWin(QWidget):
                 _z0 = 50.0
             result = compute_time_domain(
                 network, p1, p2, td_mode_map.get(facet, 'TDR'),
-                tr_ps=_tr, dt_ps=_dt, z0=_z0
+                tr_ps=_tr, dt_ps=_dt, z0=_z0,
+                s_params=self.get_param_matrix(file_name, 'S参数')
             )
             x_td = result["time_ps"]
             y_td = result["y_data"]
@@ -769,7 +905,7 @@ class SParameterViewer_MainWin(QWidget):
         return line
 
     def plot_s_parameters(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         port1 = self.port1_input.text().strip()
         port2 = self.port2_input.text().strip()
         mapping_mode = self.mapping_combo.currentText()
@@ -839,12 +975,14 @@ class SParameterViewer_MainWin(QWidget):
                                 QMessageBox.warning(self, '输入错误', '一一对应模式需要端口数量相同！')
                                 return
                             for p1, p2 in zip(port1_plot, port2_plot):
-                                line = self._plot_single_curve(network, _get_params(file_name), p1, p2)
+                                line = self._plot_single_curve(
+                                    file_name, network, _get_params(file_name), p1, p2)
                                 self.plot_lines.append(line)
                         elif mapping_mode == "交叉映射":
                             for p1 in port1_plot:
                                 for p2 in port2_plot:
-                                    line = self._plot_single_curve(network, _get_params(file_name), p1, p2)
+                                    line = self._plot_single_curve(
+                                        file_name, network, _get_params(file_name), p1, p2)
                                     self.plot_lines.append(line)
                     except Exception as e:
                         show_error(self, f"处理文件 {file_name} 时出错: {str(e)}")
@@ -873,7 +1011,7 @@ class SParameterViewer_MainWin(QWidget):
     def on_port_select(self):
         try:
             target_input = self.port2_input if self.port2_input.hasFocus() else self.port1_input
-            file_list = [a.text() for a in self.file_list.selectedItems()]
+            file_list = self.get_selected_file_keys()
             selected_ports = check_and_set_port_names(self, file_list)
             if selected_ports:
                 target_input.setText(" ".join(map(str, selected_ports)))
@@ -881,7 +1019,7 @@ class SParameterViewer_MainWin(QWidget):
             show_error(self, f"端口选择出错: {str(e)}")
 
     def call_freq_slice(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         port1 = self.port1_input.text().strip()
         port2 = self.port2_input.text().strip()
         if not selected_files or not port1 or not port2:
@@ -956,9 +1094,10 @@ class SParameterViewer_MainWin(QWidget):
             return
         for item in selected_items:
             try:
-                network = self.get_network(item.text())
+                file_name = self.get_file_key_from_item(item)
+                network = self.get_network(file_name)
                 freqs = network.f
-                print(f"\n=== {os.path.basename(item.text())} 频率轴 ===")
+                print(f"\n=== {os.path.basename(file_name)} 频率轴 ===")
                 print(f"{'序号':>5}  {'频率(GHz)':>14}  {'间距(MHz)':>10}")
                 print("-" * 38)
                 for i, f in enumerate(freqs):
@@ -972,7 +1111,7 @@ class SParameterViewer_MainWin(QWidget):
         try:
             selected_items = self.file_list.selectedItems()
             for item in selected_items:
-                file_name = item.text()
+                file_name = self.get_file_key_from_item(item)
                 S = self.get_network(file_name)
                 z0 = S.z0[0, :]
                 freq = S.f / 1e9
@@ -994,7 +1133,7 @@ class SParameterViewer_MainWin(QWidget):
     # ===== 次级界面功能 =====
 
     def call_diff_conversion(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         if not selected_files:
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
@@ -1030,8 +1169,9 @@ class SParameterViewer_MainWin(QWidget):
                             new_network = SE2diff_port(network, params['diff_list'],
                                                        params['z0_diff'], params['output_mode'])
                         if new_network:
+                            self.invalidate_file_cache(file_name)
                             new_name = self.add_unique_filename(new_network.name)
-                            self.s_data[new_name] = new_network
+                            self.register_network(new_name, new_network)
                             if new_network.port_names:
                                 print('转换后的端口名称:')
                                 print(*new_network.port_names, sep="\n")
@@ -1045,7 +1185,7 @@ class SParameterViewer_MainWin(QWidget):
 
     def call_port_reduction(self):
         try:
-            selected_files = [item.text() for item in self.file_list.selectedItems()]
+            selected_files = self.get_selected_file_keys()
             if not selected_files:
                 QMessageBox.warning(self, '错误', '请先选择文件！')
                 return
@@ -1066,6 +1206,7 @@ class SParameterViewer_MainWin(QWidget):
                 try:
                     network_ori = self.get_network(file_name)
                     enforce_nonzero_impedance(network_ori)
+                    self.invalidate_file_cache(file_name)
                     network = network_ori.copy()
                     n_ports = network.nports
                     freq = network.frequency.f
@@ -1098,7 +1239,7 @@ class SParameterViewer_MainWin(QWidget):
                     suffix = f'_renorm_R.s{network.nports}p' if all_c_zero else f'_renorm_RC.s{network.nports}p'
                     new_file_name = self.add_unique_filename(file_s_name + suffix)
                     network.name = new_file_name
-                    self.s_data[new_file_name] = network
+                    self.register_network(new_file_name, network)
                     if hasattr(network, 'port_names') and network.port_names is not None:
                         print(f"处理后的端口名称：")
                         print(*network.port_names, sep='\n')
@@ -1110,7 +1251,7 @@ class SParameterViewer_MainWin(QWidget):
 
     def call_port_reorder(self):
         try:
-            selected_files = [item.text() for item in self.file_list.selectedItems()]
+            selected_files = self.get_selected_file_keys()
             if not selected_files:
                 QMessageBox.warning(self, '错误', '请先选择文件！')
                 return
@@ -1158,7 +1299,7 @@ class SParameterViewer_MainWin(QWidget):
                     suffix = f'_reorder.s{network.nports}p'
                     new_file_name = self.add_unique_filename(name_ori + suffix)
                     network.name = new_file_name
-                    self.s_data[new_file_name] = network
+                    self.register_network(new_file_name, network)
 
                 QMessageBox.information(self, "成功", f"已成功处理{len(selected_files)}个文件的端口重排序！")
         except Exception as e:
@@ -1167,7 +1308,7 @@ class SParameterViewer_MainWin(QWidget):
 
     def call_port_merge(self):
         try:
-            selected_files = [item.text() for item in self.file_list.selectedItems()]
+            selected_files = self.get_selected_file_keys()
             if not selected_files:
                 QMessageBox.warning(self, '错误', '请先选择文件！')
                 return
@@ -1198,12 +1339,16 @@ class SParameterViewer_MainWin(QWidget):
                                             f'最大端口数为 {n_ports}')
                         continue
 
-                    new_network = merge_ports_multi(network, merge_groups_0based, z0_list)
+                    y_params = self.get_y(file_name)
+                    if y_params is None:
+                        continue
+                    new_network = merge_ports_multi(
+                        network, merge_groups_0based, z0_list, y_orig=y_params)
                     suffix = f'_merged.s{new_network.nports}p'
                     base = os.path.splitext(network_ori.name)[0]
                     new_file_name = self.add_unique_filename(base + suffix)
                     new_network.name = new_file_name
-                    self.s_data[new_file_name] = new_network
+                    self.register_network(new_file_name, new_network)
                     print(f'合并完成: {new_file_name}')
                     print('新端口名称:')
                     print(*new_network.port_names, sep='\n')
@@ -1228,7 +1373,7 @@ class SParameterViewer_MainWin(QWidget):
             dispatch[result]()
 
     def call_edit_port_names(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         if not selected_files:
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
@@ -1243,15 +1388,13 @@ class SParameterViewer_MainWin(QWidget):
         new_names = helper._show_edit_dialog(prefill_text=prefill)
         if new_names:
             network.port_names = new_names
-            self.s_param.pop(file_name, None)
-            self.y_param.pop(file_name, None)
-            self.z_param.pop(file_name, None)
+            self.invalidate_file_cache(file_name)
             print(f"端口名称已更新（{file_name}）:")
             for i, name in enumerate(new_names, 1):
                 print(f"  Port {i}: {name}")
 
     def call_edit_z0(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         if not selected_files:
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
@@ -1266,16 +1409,14 @@ class SParameterViewer_MainWin(QWidget):
                 return
             for i, z0_val in enumerate(new_z0):
                 network.z0[:, i] = z0_val
-            self.s_param.pop(file_name, None)
-            self.y_param.pop(file_name, None)
-            self.z_param.pop(file_name, None)
+            self.invalidate_file_cache(file_name)
             print(f"参考阻抗已更新（{file_name}）:")
             for i, z in enumerate(new_z0, 1):
                 print(f"  Port {i}: {z:.1f} Ω")
 
     def call_cascade(self):
         try:
-            selected_files = [item.text() for item in self.file_list.selectedItems()]
+            selected_files = self.get_selected_file_keys()
             if not selected_files:
                 QMessageBox.warning(self, '错误', '请先选择文件！')
                 return
@@ -1293,6 +1434,7 @@ class SParameterViewer_MainWin(QWidget):
 
                 ntwk = self.get_network(file_name)
                 enforce_nonzero_impedance(ntwk)
+                self.invalidate_file_cache(file_name)
 
                 total_ports = list(range(ntwk.nports))
                 left_indices = [p - 1 for p in left_ports]
@@ -1332,14 +1474,14 @@ class SParameterViewer_MainWin(QWidget):
             suffix = f'_cascade.s{result.nports}p'
             new_file_name = self.add_unique_filename(name_first + suffix)
             result.name = new_file_name
-            self.s_data[new_file_name] = result
+            self.register_network(new_file_name, result)
             print(f'freq: {len(result.f)}')
             print(f'sparam: {len(result.s)}')
         except Exception as e:
             show_error(self, f"出错: {str(e)}")
 
     def call_ripple_dialog(self):
-        selected_files = [item.text() for item in self.file_list.selectedItems()]
+        selected_files = self.get_selected_file_keys()
         if not selected_files:
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
