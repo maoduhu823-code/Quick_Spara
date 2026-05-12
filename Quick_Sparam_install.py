@@ -20,8 +20,8 @@ def main():
     app = QApplication(sys.argv)
     from app_utils import resource_path
     from main_window import SParameterViewer_MainWin
-    from runtime_services.trial_manager import check_trial_permission
-    from runtime_services.version_manager import check_version_update_async
+    from QS_runtime_services.trial_manager import check_trial_permission
+    from QS_runtime_services.version_manager import check_version_update_async
 
     app_icon = QIcon(resource_path("resources/ico_test.ico"))
     app.setWindowIcon(app_icon)

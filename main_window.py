@@ -16,39 +16,30 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from sparam_core import (enforce_nonzero_impedance, enforce_nonzero_z0,
+from sparam_core import (enforce_nonzero_z0,
                          SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,
                          merge_ports_multi, compute_time_domain)
-from app_utils import show_error, check_and_set_port_names
-from runtime_services.trial_manager import check_trial_permission
-from runtime_services.usage_tracker import UsageTracker
-from runtime_services.feedback_manager import show_feedback_dialog
-from runtime_services.version_manager import APP_VERSION, print_version_info
-from dialogs.cascade import CascadeDialog
-from dialogs.se2diff import DiffConversionDialog
-from dialogs.port_reduction import PortReductionDialog
-from dialogs.port_reorder import PortOrderEditor
-from dialogs.port_selector import PortSelector
-from dialogs.port_name import PortNameDialog
-from dialogs.loading import LoadingDialog
-from dialogs.ripple import RippleFitDialog
-from dialogs.port_merge import PortMergeDialog
-from dialogs.port_management import PortManagementDialog, Z0EditDialog
+from QS_domain.algorithms.impedance import has_zero_impedance, replace_zero_impedance
+from QS_domain.display_config import FACET_OPTIONS as _FACET_OPTIONS, DEFAULT_SCALES as _DEFAULT_SCALES
+from app_utils import show_error, check_and_set_port_names, configure_matplotlib
+from QS_services.network_service import NetworkService, NetworkLoadError
+from QS_services.plotting_service import compute_param_data
+from QS_runtime_services.trial_manager import check_trial_permission
+from QS_runtime_services.usage_tracker import UsageTracker
+from QS_runtime_services.feedback_manager import show_feedback_dialog
+from QS_runtime_services.version_manager import APP_VERSION, print_version_info
+from QS_dialogs.cascade import CascadeDialog
+from QS_dialogs.se2diff import DiffConversionDialog
+from QS_dialogs.port_reduction import PortReductionDialog
+from QS_dialogs.port_reorder import PortOrderEditor
+from QS_dialogs.port_selector import PortSelector
+from QS_dialogs.port_name import PortNameDialog
+from QS_dialogs.loading import LoadingDialog
+from QS_dialogs.ripple import RippleFitDialog
+from QS_dialogs.port_merge import PortMergeDialog
+from QS_dialogs.port_management import PortManagementDialog, Z0EditDialog
 
-# 参数类型 → 数据切面选项
-_FACET_OPTIONS = {
-    'S参数': ['幅度(dB)', '幅度(abs)', '相位(度)', '相位(rad)',
-              'unwrap相位(度)', 'unwrap相位(rad)', '实部', '虚部', '群延迟(fs)'],
-    'Y参数': ['导纳(abs)', '幅度(dB)', '相位(度)', '实部', '虚部'],
-    'Z参数': ['阻抗(mΩ)', '幅度(dB)', '相位(度)', '实部(ESR)', '虚部', '电容(pF)'],
-    '时域':  ['TDR阻抗', '阶跃响应', '冲激响应', '脉冲响应'],
-}
-# (参数类型, 数据切面) → (X轴缩放, Y轴缩放) 默认值
-_DEFAULT_SCALES = {
-    ('Z参数', '阻抗(mΩ)'): ('对数', '对数'),
-    ('Y参数', '导纳(abs)'): ('对数', '对数'),
-    ('Z参数', '实部(ESR)'): ('对数', '线性'),
-}
+# 显示配置从 QS_domain.display_config 统一导入（见上方 import）
 _TIME_DOMAIN_UNAVAILABLE_MESSAGE = (
     "提示：时域功能尚未调试完备，当前版本暂不执行时域分析/绘图。"
 )
@@ -66,127 +57,48 @@ class SParameterViewer_MainWin(QWidget):
         super().__init__()
         self.enable_time_domain = enable_time_domain
         self.usage_tracker = UsageTracker()
+        self._net_svc = NetworkService()
         self.initUI()
         self.plot_history = []
         self.current_plot_data = []
-        self.s_data = {}
-        self.s_param = {}
-        self.y_param = {}
-        self.z_param = {}
-        self.file_fingerprints = {}
         self.loading = LoadingDialog(self)
 
-    # ===== 数据缓存方法 =====
+    # ===== 数据缓存方法（委托给 NetworkService）=====
 
-    def _is_cache_debug_enabled(self):
-        return (hasattr(self, 'cache_debug_checkbox') and
-                self.cache_debug_checkbox.isChecked())
+    def _sync_debug_mode(self):
+        """将 UI 调试开关状态同步到 NetworkService。"""
+        if hasattr(self, 'cache_debug_checkbox'):
+            self._net_svc.debug = self.cache_debug_checkbox.isChecked()
 
-    def _cache_debug(self, message):
-        if self._is_cache_debug_enabled():
-            print(message)
-
-    def _file_fingerprint(self, file_name):
-        """返回磁盘文件指纹；内存生成的Network没有指纹。"""
-        if not isinstance(file_name, str) or not os.path.isfile(file_name):
-            return None
-        try:
-            stat = os.stat(file_name)
-            return (os.path.abspath(file_name), stat.st_mtime_ns, stat.st_size)
-        except OSError:
-            return None
+    @property
+    def s_data(self):
+        """暴露 Network 字典，供 freq_analysis / time_domain 对话框直接传参。"""
+        return self._net_svc.s_data
 
     def get_network(self, file_name):
-        """从缓存获取或加载网络对象"""
-        fingerprint = self._file_fingerprint(file_name)
-        cached_fingerprint = self.file_fingerprints.get(file_name)
-        if (file_name in self.s_data and fingerprint is not None and
-                cached_fingerprint is not None and fingerprint != cached_fingerprint):
-            self._cache_debug(f"[cache] Network stale: {file_name}，磁盘文件已变化，重新读取")
-            self.invalidate_file_cache(file_name, include_network=True)
-
-        if file_name not in self.s_data:
-            self._cache_debug(f"[cache] Network miss: {file_name}")
-            self.s_data[file_name] = rf.Network(file_name)
-            enforce_nonzero_z0(self.s_data[file_name], file_name)
-            self.file_fingerprints[file_name] = fingerprint
-        else:
-            self._cache_debug(f"[cache] Network hit: {file_name}")
-        return self.s_data[file_name]
+        self._sync_debug_mode()
+        return self._net_svc.get_network(file_name)
 
     def register_network(self, file_name, network):
-        """注册内存生成的Network，并清理同名旧参数缓存。"""
-        self.invalidate_file_cache(file_name, include_network=True)
-        self.s_data[file_name] = network
-        self.file_fingerprints[file_name] = None
-        self._cache_debug(f"[cache] Network register: {file_name}")
-
-    def _validate_cached_param(self, file_name, param_type, cached_matrix):
-        """调试模式下校验缓存和当前Network是否一致。"""
-        if not self._is_cache_debug_enabled() or param_type != 'S参数':
-            return True
-        try:
-            live_matrix = self.s_data[file_name].s
-            same_shape = cached_matrix.shape == live_matrix.shape
-            same_data = same_shape and np.allclose(
-                cached_matrix, live_matrix, rtol=1e-9, atol=1e-12,
-                equal_nan=True
-            )
-            if not same_data:
-                self._cache_debug(f"[cache] S参数缓存不一致，已丢弃: {file_name}")
-                return False
-        except Exception as e:
-            self._cache_debug(f"[cache] S参数缓存校验失败，已丢弃: {file_name} ({e})")
-            return False
-        return True
+        self._sync_debug_mode()
+        self._net_svc.register_network(file_name, network)
 
     def get_param_matrix(self, file_name, param_type):
-        """统一获取S/Y/Z矩阵，所有模块共享同一套懒加载缓存。"""
-        network = self.get_network(file_name)
-        cache_map = {
-            'S参数': self.s_param,
-            'Y参数': self.y_param,
-            'Z参数': self.z_param,
-        }
-        attr_map = {
-            'S参数': 's',
-            'Y参数': 'y',
-            'Z参数': 'z',
-        }
-        if param_type not in cache_map:
-            raise ValueError(f"未知参数类型: {param_type}")
-
-        cache = cache_map[param_type]
-        if file_name in cache:
-            if self._validate_cached_param(file_name, param_type, cache[file_name]):
-                self._cache_debug(
-                    f"[cache] {param_type} hit: {file_name}, shape={cache[file_name].shape}"
-                )
-                return cache[file_name]
-            cache.pop(file_name, None)
-
+        self._sync_debug_mode()
         try:
-            cache[file_name] = getattr(network, attr_map[param_type])
-            self._cache_debug(
-                f"[cache] {param_type} miss: {file_name}, shape={cache[file_name].shape}"
-            )
-        except Exception as e:
-            QMessageBox.warning(self, '加载错误',
-                                f"无法读取 {file_name}的{param_type}:\n{str(e)}")
+            return self._net_svc.get_param_matrix(file_name, param_type)
+        except NetworkLoadError as e:
+            QMessageBox.warning(self, '加载错误', str(e))
             return None
-        return cache[file_name]
 
     def get_s(self, file_name):
-        """从缓存获取S参数矩阵"""
-        return self.get_param_matrix(file_name, 'S参数')
+        return self._net_svc.get_s(file_name)
 
     def get_z(self, file_name):
-        """从缓存获取Z参数矩阵"""
-        return self.get_param_matrix(file_name, 'Z参数')
+        return self._net_svc.get_z(file_name)
 
     def get_y(self, file_name):
-        """从缓存获取Y参数矩阵"""
-        return self.get_param_matrix(file_name, 'Y参数')
+        return self._net_svc.get_y(file_name)
 
     # ===== 文件列表显示/取值方法 =====
 
@@ -223,24 +135,11 @@ class SParameterViewer_MainWin(QWidget):
             self._update_file_item_display(self.file_list.item(i))
 
     def invalidate_file_cache(self, file_name, include_network=False):
-        """清理单个文件的派生参数缓存；必要时同时移除Network对象"""
-        self.s_param.pop(file_name, None)
-        self.y_param.pop(file_name, None)
-        self.z_param.pop(file_name, None)
-        if include_network:
-            self.s_data.pop(file_name, None)
-            self.file_fingerprints.pop(file_name, None)
-        self._cache_debug(
-            f"[cache] invalidate: {file_name}, include_network={include_network}"
-        )
+        """清理单个文件的派生参数缓存；必要时同时移除 Network 对象。"""
+        self._net_svc.invalidate_file_cache(file_name, include_network=include_network)
 
     def clear_all_cache(self):
-        self.s_data.clear()
-        self.s_param.clear()
-        self.y_param.clear()
-        self.z_param.clear()
-        self.file_fingerprints.clear()
-        self._cache_debug("[cache] clear all")
+        self._net_svc.clear_all_cache()
 
     def add_unique_filename(self, new_file_name):
         """向文件列表添加不重复的文件名，冲突时自动加数字后缀"""
@@ -844,35 +743,9 @@ class SParameterViewer_MainWin(QWidget):
             return line
 
         param = szy_params[:, p1 - 1, p2 - 1]
-
-        if facet == '幅度(dB)':
-            y_data = 20 * np.log10(np.abs(param))
-        elif facet in ('幅度(abs)', '导纳(abs)'):
-            y_data = np.abs(param)
-        elif facet == '阻抗(mΩ)':
-            y_data = 1000 * np.abs(param)
-        elif facet == '相位(度)':
-            y_data = np.angle(param) * 180 / np.pi
-        elif facet == '相位(rad)':
-            y_data = np.angle(param)
-        elif facet == 'unwrap相位(度)':
-            y_data = np.unwrap(np.angle(param)) * 180 / np.pi
-        elif facet == 'unwrap相位(rad)':
-            y_data = np.unwrap(np.angle(param))
-        elif facet == '群延迟(fs)':
-            phase = np.unwrap(np.angle(param))
-            tau_g = -np.gradient(phase, freqG * 1e9) / (2 * np.pi)
-            y_data = tau_g * 1e15
-        elif facet in ('实部', '实部(ESR)'):
-            y_data = np.real(param)
-        elif facet == '虚部':
-            y_data = np.imag(param)
-        elif facet == '电容(pF)':
-            with np.errstate(divide='ignore', invalid='ignore'):
-                y_data = -1.0 / (2 * np.pi * freqG * 1e9 * np.imag(param)) * 1e12
+        y_data, _ = compute_param_data(param, facet, freqG)
+        if facet == '电容(pF)':
             label = f'{network.name}_C{p1},{p2}'
-        else:
-            y_data = np.abs(param)
 
         if self.legend_checkbox.isChecked():
             line, = self.ax.plot(freqG, y_data, label=label, picker=5)
@@ -940,12 +813,8 @@ class SParameterViewer_MainWin(QWidget):
             self.plot_history.append(new_plot_data)
 
         plt = _get_pyplot()
+        configure_matplotlib()
         self.fig, self.ax = plt.subplots()
-        if sys.platform == 'win32':
-            plt.rcParams['font.sans-serif'] = ['SimHei']
-        else:
-            plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
-        plt.rcParams['axes.unicode_minus'] = False
         param_type, facet, _, _ = self.get_current_plot_config()
         if param_type == '时域':
             _td_ylabels = {'TDR阻抗': '阻抗 (Ω)', '阶跃响应': '阶跃响应',
@@ -1055,11 +924,7 @@ class SParameterViewer_MainWin(QWidget):
             return
 
         plt = _get_pyplot()
-        if sys.platform == 'win32':
-            plt.rcParams['font.sans-serif'] = ['SimHei']
-        else:
-            plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
-        plt.rcParams['axes.unicode_minus'] = False
+        configure_matplotlib()
 
         for file_name in selected_files:
             try:
@@ -1207,7 +1072,7 @@ class SParameterViewer_MainWin(QWidget):
             if len(selected_files) > 1:
                 QMessageBox.information(self, "提示", "检测到多文件选择，请确定选择的S参数以同样的配置处理端口")
 
-            dialog = PortReductionDialog(self, selected_files)
+            dialog = PortReductionDialog(self, selected_files, network_service=self._net_svc)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
 
@@ -1331,7 +1196,7 @@ class SParameterViewer_MainWin(QWidget):
                 QMessageBox.information(self, "提示",
                                         "检测到多文件选择，请确定选择的S参数以同样的配置处理端口")
 
-            dialog = PortMergeDialog(self, selected_files)
+            dialog = PortMergeDialog(self, selected_files, network_service=self._net_svc)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
 
@@ -1436,7 +1301,7 @@ class SParameterViewer_MainWin(QWidget):
                 QMessageBox.warning(self, '错误', '请先选择文件！')
                 return
 
-            dialog = CascadeDialog(self, selected_files)
+            dialog = CascadeDialog(self, selected_files, network_service=self._net_svc)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
 
@@ -1448,7 +1313,13 @@ class SParameterViewer_MainWin(QWidget):
                 right_ports = cfg["ports_right"]
 
                 ntwk = self.get_network(file_name)
-                enforce_nonzero_impedance(ntwk)
+                if has_zero_impedance(ntwk):
+                    z0_val, ok = QInputDialog.getDouble(
+                        self, "阻抗设置",
+                        f"检测到 {file_name} 中存在零阻抗端口。\n请输入要使用的阻抗值(Ω):",
+                        50.0, 0.1, 10000.0, 2)
+                    if ok:
+                        replace_zero_impedance(ntwk, z0_val)
                 self.invalidate_file_cache(file_name)
 
                 total_ports = list(range(ntwk.nports))
@@ -1500,11 +1371,11 @@ class SParameterViewer_MainWin(QWidget):
         if not selected_files:
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
-        dialog = RippleFitDialog(self, selected_files)
+        dialog = RippleFitDialog(self, selected_files, network_service=self._net_svc)
         dialog.exec()
 
     def call_frequency_analysis_dialog(self):
-        from dialogs.freq_analysis import frequencyAnalysisDialog
+        from QS_dialogs.freq_analysis import frequencyAnalysisDialog
 
         dialog = frequencyAnalysisDialog(self.s_data, self)
         dialog.show()
@@ -1513,6 +1384,10 @@ class SParameterViewer_MainWin(QWidget):
         if not self.enable_time_domain:
             self._print_info(_TIME_DOMAIN_UNAVAILABLE_MESSAGE)
             return
-        from dialogs.time_domain import TimeDomainDialog
-        dialog = TimeDomainDialog(self.s_data, self)
+        from QS_dialogs.time_domain import TimeDomainDialog
+        dialog = TimeDomainDialog(
+            self.s_data, self,
+            network_service=self._net_svc,
+            get_selected_files=self.get_selected_file_keys,
+        )
         dialog.show()

@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>信息收集模块使用说明</title>
+  <style>
+    :root {
+      --text: #17202a;
+      --muted: #5f6b7a;
+      --line: #d8dee8;
+      --soft: #f5f7fa;
+      --accent: #0f6aa8;
+      --accent-soft: #e8f3fb;
+    }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+      color: var(--text);
+      background: #fff;
+      line-height: 1.65;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 28px 52px;
+    }
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.3;
+      color: #101820;
+    }
+    h1 {
+      font-size: 30px;
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 22px;
+      margin-top: 34px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 17px;
+      margin-top: 22px;
+    }
+    p {
+      margin: 10px 0;
+    }
+    code {
+      font-family: Consolas, "Cascadia Mono", monospace;
+      background: #eef2f6;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    pre {
+      overflow: auto;
+      border-radius: 8px;
+      background: #111a24;
+      color: #e8eef6;
+      padding: 14px 16px;
+      line-height: 1.45;
+      font-size: 13px;
+    }
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--soft);
+      white-space: nowrap;
+    }
+    ul, ol {
+      padding-left: 24px;
+    }
+    li {
+      margin: 5px 0;
+    }
+    .lead {
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+    .note {
+      margin: 14px 0;
+      padding: 10px 14px;
+      background: var(--accent-soft);
+      border-left: 4px solid var(--accent);
+    }
+    .preview-list {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      margin-top: 18px;
+    }
+    figure {
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    figure img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    figcaption {
+      padding: 9px 12px;
+      font-size: 14px;
+      color: var(--muted);
+      background: var(--soft);
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>信息收集模块使用说明</h1>
+  <p class="lead">
+    这个模块只包含用户资料登记、启动/关闭使用记录、评价反馈、JSON 记录汇总到 Excel。
+    不包含试用过期关闭和版本更新提醒。
+  </p>
+
+  <h2>界面预览</h2>
+  <div class="preview-list">
+    <figure>
+      <img src="readme_assets/usage_survey_default.png" alt="用户信息登记默认界面">
+      <figcaption>首次使用时弹出用户信息登记，收集部门、LM大组、PL小组和应用项目。</figcaption>
+    </figure>
+    <figure>
+      <img src="readme_assets/usage_survey_other_department.png" alt="用户信息登记其他选项界面">
+      <figcaption>部门、大组、小组支持“其他”输入，并按上一级选择联动。</figcaption>
+    </figure>
+    <figure>
+      <img src="readme_assets/feedback_dialog_default.png" alt="评价与反馈界面">
+      <figcaption>主界面按钮打开评价&反馈，用于收集使用强度、效率提升和需求文本。</figcaption>
+    </figure>
+  </div>
+
+  <h2>模块功能</h2>
+  <ul>
+    <li>首次运行登记用户资料，并在本地保存 <code>Public/usage_profile.json</code>，避免重复弹窗。</li>
+    <li>每次启动和关闭记录主机名、启动时间、关闭时间。</li>
+    <li>用户可主动提交评价&反馈。</li>
+    <li>运行时只写独立 JSON 小文件，避免多人直接写同一个 Excel 造成文件锁。</li>
+    <li>开发者定时汇总 inbox，生成用户资料、使用记录、反馈三类 Excel 总表。</li>
+  </ul>
+
+  <h2>接入代码</h2>
+  <p>把 <code>runtime_services</code> 文件夹放到工程入口脚本同级，然后在主窗口中接入：</p>
+  <pre><code class="language-python">from PyQt6.QtWidgets import QPushButton, QWidget
+
+from runtime_services.feedback_collection import UsageTracker, show_feedback_dialog
+
+
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.usage_tracker = UsageTracker()
+
+        self.feedback_button = QPushButton("评价&amp;反馈")
+        self.feedback_button.clicked.connect(self.open_feedback_dialog)
+
+    def prompt_usage_profile(self):
+        self.usage_tracker.ensure_profile(parent=self)
+
+    def open_feedback_dialog(self):
+        show_feedback_dialog(self)
+
+    def closeEvent(self, event):
+        self.usage_tracker.write_usage_log()
+        super().closeEvent(event)</code></pre>
+
+  <p>建议主界面显示后再弹首次用户资料问卷：</p>
+  <pre><code class="language-python">from PyQt6.QtCore import QTimer
+
+window = MainWindow()
+window.show()
+QTimer.singleShot(300, window.prompt_usage_profile)</code></pre>
+
+  <h2>需要修改的配置</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>文件</th>
+        <th>修改内容</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>collection_config.py</code></td>
+        <td>
+          软件名、版本号、用户资料问卷文案、部门/大组/小组选项、评价反馈选项、默认值、表头字段。
+        </td>
+      </tr>
+      <tr>
+        <td><code>path_config.py</code></td>
+        <td>
+          本地 <code>Public</code> 路径、开发者共享 inbox 路径、三个 summary Excel 文件名和输出路径。
+        </td>
+      </tr>
+      <tr>
+        <td><code>notice_manager.py</code></td>
+        <td>共享路径不可访问时，在信息框里输出的统一提示文本。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    正常改配置只需要看 <code>collection_config.py</code> 和 <code>path_config.py</code>。
+    其他文件是运行逻辑，除非要改交互或汇总规则，一般不用动。
+  </div>
+
+  <h2>数据写入位置</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>路径或文件</th>
+        <th>用途</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>Public/usage_profile.json</code></td>
+        <td>本机用户资料缓存。</td>
+      </tr>
+      <tr>
+        <td><code>data_feedback/inbox/user_data_*.json</code></td>
+        <td>用户资料提交记录。</td>
+      </tr>
+      <tr>
+        <td><code>data_feedback/inbox/usage_*.json</code></td>
+        <td>启动/关闭时间记录。</td>
+      </tr>
+      <tr>
+        <td><code>data_feedback/inbox/feedback_*.json</code></td>
+        <td>评价&反馈记录。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>汇总命令</h2>
+  <pre><code class="language-bash"># 汇总开发者共享目录 inbox，一次性执行
+python -m runtime_services.data_feedback_aggregator --target developer --once
+
+# 每 10 分钟汇总一次
+python -m runtime_services.data_feedback_aggregator --target developer --interval-seconds 600
+
+# 本机调试只汇总 .\Public\data_feedback\inbox
+python -m runtime_services.data_feedback_aggregator --target local --once</code></pre>
+
+  <p>汇总成功后会生成或续写：</p>
+  <ul>
+    <li><code>Quick_Sparam_user_data_summary.xlsx</code></li>
+    <li><code>Quick_Sparam_usage_summary.xlsx</code>，包含“使用记录”和“主机累计统计”。</li>
+    <li><code>Quick_Sparam_feedback_summary.xlsx</code></li>
+  </ul>
+
+  <h2>本地测试</h2>
+  <pre><code class="language-bash">python -m runtime_services.usage_tracker
+python -m runtime_services.feedback_manager
+python -m runtime_services.data_feedback_aggregator_smoke_test</code></pre>
+</main>
+</body>
+</html>

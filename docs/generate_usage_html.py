@@ -406,9 +406,9 @@ def generate_charts() -> dict[str, Path]:
     paths: dict[str, Path] = {}
 
     sample_files = [
-        (ROOT / "input_test" / "StackupDemo1_test.s4p", "Demo-1"),
-        (ROOT / "input_test" / "Twinax line-Spara1G.s4p", "Twinax"),
-        (ROOT / "input_test" / "connector_model.s4p", "Connector"),
+        (ROOT / "samples" / "StackupDemo1_test.s4p", "Demo-1"),
+        (ROOT / "samples" / "Twinax line-Spara1G.s4p", "Twinax"),
+        (ROOT / "samples" / "connector_model.s4p", "Connector"),
     ]
 
     import skrf
@@ -491,12 +491,12 @@ def capture_screenshots() -> dict[str, Path]:
     from PyQt6.QtGui import QFont
 
     from main_window import SParameterViewer_MainWin
-    from dialogs.cascade import CascadeDialog
-    from dialogs.freq_analysis import frequencyAnalysisDialog
-    from dialogs.port_management import PortManagementDialog
-    from dialogs.ripple import RippleFitDialog
-    from dialogs.se2diff import DiffConversionDialog
-    from dialogs.time_domain import TimeDomainDialog
+    from QS_dialogs.cascade import CascadeDialog
+    from QS_dialogs.freq_analysis import frequencyAnalysisDialog
+    from QS_dialogs.port_management import PortManagementDialog
+    from QS_dialogs.ripple import RippleFitDialog
+    from QS_dialogs.se2diff import DiffConversionDialog
+    from QS_dialogs.time_domain import TimeDomainDialog
 
     os.environ.pop("QT_QPA_PLATFORM", None)
     app = QApplication.instance() or QApplication(sys.argv)
@@ -525,9 +525,9 @@ def capture_screenshots() -> dict[str, Path]:
         print(f"  截图: {name}.png")
 
     sample_files = [
-        ROOT / "input_test" / "StackupDemo1_test.s4p",
-        ROOT / "input_test" / "Twinax line-Spara1G.s4p",
-        ROOT / "input_test" / "connector_model.s4p",
+        ROOT / "samples" / "StackupDemo1_test.s4p",
+        ROOT / "samples" / "Twinax line-Spara1G.s4p",
+        ROOT / "samples" / "connector_model.s4p",
     ]
 
     # Main window with demo state
@@ -887,7 +887,7 @@ def build_html(screenshots: dict[str, Path], charts: dict[str, Path]) -> str:
             parts = []
             for key, caption in [
                 ("s_param_comparison",
-                 "图示：插损 S21（左）与回损 S11（右）对比，示例使用 input_test/ 中的样本文件"),
+                 "图示：插损 S21（左）与回损 S11（右）对比，示例使用 samples/ 中的样本文件"),
                 ("s_param_full_matrix",
                  "图示：全矩阵 S 参数（S11 ~ S44），可在主界面「绘图控制区」直接生成"),
             ]:

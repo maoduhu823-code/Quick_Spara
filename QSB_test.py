@@ -19,8 +19,8 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
     from main_window import SParameterViewer_MainWin
-    from runtime_services.trial_manager import check_trial_permission
-    from runtime_services.version_manager import check_version_update_async
+    from QS_runtime_services.trial_manager import check_trial_permission
+    from QS_runtime_services.version_manager import check_version_update_async
 
     if not check_trial_permission():
         sys.exit(1)

@@ -2,7 +2,7 @@ import skrf as rf
 import numpy as np
 
 # 1. 加载 S2P 文件
-ntw = rf.Network('../input_test/StackupDemo1_test_renorm_R.s2p')
+ntw = rf.Network('../samples/StackupDemo1_test_renorm_R.s2p')
 
 # 2. 获取 Y 参数矩阵，其 shape 为 (f, 2, 2)
 # y[:, 0, 0] 是 Y11, y[:, 0, 1] 是 Y12, 依此类推

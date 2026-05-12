@@ -75,12 +75,12 @@ def capture_ui_screenshots() -> dict[str, Path]:
     from PyQt6.QtWidgets import QListWidgetItem
 
     from main_window import SParameterViewer_MainWin
-    from dialogs.cascade import CascadeDialog
-    from dialogs.freq_analysis import frequencyAnalysisDialog
-    from dialogs.port_management import PortManagementDialog
-    from dialogs.ripple import RippleFitDialog
-    from dialogs.se2diff import DiffConversionDialog
-    from dialogs.time_domain import TimeDomainDialog
+    from QS_dialogs.cascade import CascadeDialog
+    from QS_dialogs.freq_analysis import frequencyAnalysisDialog
+    from QS_dialogs.port_management import PortManagementDialog
+    from QS_dialogs.ripple import RippleFitDialog
+    from QS_dialogs.se2diff import DiffConversionDialog
+    from QS_dialogs.time_domain import TimeDomainDialog
 
     app = _qt_app()
     original_stdout = sys.stdout
@@ -99,9 +99,9 @@ def capture_ui_screenshots() -> dict[str, Path]:
     sys.stdout = original_stdout
 
     sample_files = [
-        ROOT / "input_test" / "StackupDemo1_test.s4p",
-        ROOT / "input_test" / "Twinax line-Spara1G.s4p",
-        ROOT / "input_test" / "connector_model.s4p",
+        ROOT / "samples" / "StackupDemo1_test.s4p",
+        ROOT / "samples" / "Twinax line-Spara1G.s4p",
+        ROOT / "samples" / "connector_model.s4p",
     ]
     for sample in sample_files:
         main.file_list.addItem(str(sample))
