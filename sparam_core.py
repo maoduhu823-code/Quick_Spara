@@ -1,4 +1,8 @@
 import sys
+import os
+
+os.environ.setdefault("SKRF_PLOT_ENV", "none")
+
 import numpy as np
 import skrf as rf
 from scipy.signal import savgol_filter

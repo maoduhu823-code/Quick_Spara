@@ -1,9 +1,9 @@
-from datetime import datetime
-import getpass
 import subprocess
 import sys
 import os
 import traceback
+
+os.environ.setdefault("SKRF_PLOT_ENV", "none")
 
 import numpy as np
 import skrf as rf
@@ -14,19 +14,17 @@ from PyQt6.QtWidgets import (
     QComboBox, QGroupBox, QCheckBox, QGridLayout, QListWidgetItem,
     QTextEdit, QDialog, QInputDialog
 )
-from PyQt6.QtCore import Qt
-from openpyxl import Workbook, load_workbook
-import matplotlib
-import matplotlib.pyplot as plt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from sparam_core import (enforce_nonzero_impedance, enforce_nonzero_z0,
                          SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,
                          merge_ports_multi, compute_time_domain)
 from app_utils import show_error, check_and_set_port_names
-from trial_manager import check_trial_permission
-from version_manager import APP_VERSION
+from runtime_services.trial_manager import check_trial_permission
+from runtime_services.usage_tracker import UsageTracker
+from runtime_services.feedback_manager import show_feedback_dialog
+from runtime_services.version_manager import APP_VERSION, print_version_info
 from dialogs.cascade import CascadeDialog
-from dialogs.freq_analysis import frequencyAnalysisDialog
 from dialogs.se2diff import DiffConversionDialog
 from dialogs.port_reduction import PortReductionDialog
 from dialogs.port_reorder import PortOrderEditor
@@ -51,13 +49,23 @@ _DEFAULT_SCALES = {
     ('Y参数', '导纳(abs)'): ('对数', '对数'),
     ('Z参数', '实部(ESR)'): ('对数', '线性'),
 }
+_TIME_DOMAIN_UNAVAILABLE_MESSAGE = (
+    "提示：时域功能尚未调试完备，当前版本暂不执行时域分析/绘图。"
+)
+
+
+def _get_pyplot():
+    import matplotlib.pyplot as plt
+    return plt
 
 
 class SParameterViewer_MainWin(QWidget):
-    def __init__(self):
+    _append_output_signal = pyqtSignal(str)
+
+    def __init__(self, enable_time_domain=True):
         super().__init__()
-        self.start_time = datetime.now()
-        self.user_name = getpass.getuser()
+        self.enable_time_domain = enable_time_domain
+        self.usage_tracker = UsageTracker()
         self.initUI()
         self.plot_history = []
         self.current_plot_data = []
@@ -323,13 +331,25 @@ class SParameterViewer_MainWin(QWidget):
         self.ripple_btn.clicked.connect(self.call_ripple_dialog)
         sparam_ops_layout.addWidget(self.ripple_btn)
 
-        self.td_analysis_btn = QPushButton('时域分析')
-        self.td_analysis_btn.setFixedHeight(32)
-        self.td_analysis_btn.clicked.connect(self.call_time_domain_dialog)
-        sparam_ops_layout.addWidget(self.td_analysis_btn)
+        self.td_analysis_btn = None
+        if self.enable_time_domain:
+            self.td_analysis_btn = QPushButton('时域分析')
+            self.td_analysis_btn.setFixedHeight(32)
+            self.td_analysis_btn.clicked.connect(self.call_time_domain_dialog)
+            sparam_ops_layout.addWidget(self.td_analysis_btn)
 
         sparam_ops_group.setLayout(sparam_ops_layout)
         left_panel.addWidget(sparam_ops_group)
+
+        feedback_group = QGroupBox("信息反馈")
+        feedback_layout = QVBoxLayout()
+        feedback_layout.setSpacing(4)
+        self.feedback_button = QPushButton("评价&反馈")
+        self.feedback_button.setFixedHeight(32)
+        self.feedback_button.clicked.connect(self.open_feedback_dialog)
+        feedback_layout.addWidget(self.feedback_button)
+        feedback_group.setLayout(feedback_layout)
+        left_panel.addWidget(feedback_group)
 
         left_panel.addStretch()
 
@@ -443,8 +463,6 @@ class SParameterViewer_MainWin(QWidget):
         self._td_widgets = [self._td_tr_lbl, self._td_tr_edit,
                             self._td_dt_lbl, self._td_dt_edit,
                             self._td_z0_lbl, self._td_z0_edit]
-        for w in self._td_widgets:
-            w.setVisible(False)
 
         self.legend_checkbox = QCheckBox("显示图例")
         self.legend_checkbox.setChecked(True)
@@ -457,11 +475,6 @@ class SParameterViewer_MainWin(QWidget):
         self.freG_input = QLineEdit("")
         self.freG_input.setPlaceholderText("GHz")
         plot_right_layout.addWidget(self.freG_input, 5, 3)
-
-        # 初始化切面选项并连接信号
-        self._update_facet_options()
-        self.param_type_combo.currentIndexChanged.connect(self._update_facet_options)
-        self.facet_combo.currentIndexChanged.connect(self._update_default_scales)
 
         plot_layout.addLayout(plot_left_layout, stretch=2)
         plot_layout.addLayout(plot_right_layout, stretch=2)
@@ -500,11 +513,15 @@ class SParameterViewer_MainWin(QWidget):
         output_group.setLayout(output_layout)
         down_panel.addWidget(output_group)
 
+        self._append_output_signal.connect(self._append_output_text)
         self._original_stdout = sys.stdout
         sys.stdout = self
         main_layout.addLayout(down_panel, stretch=2)
 
         self.setLayout(main_layout)
+        self.param_type_combo.currentIndexChanged.connect(self._update_facet_options)
+        self.facet_combo.currentIndexChanged.connect(self._update_default_scales)
+        self._update_facet_options()
         self._setup_ui_style()
 
     # ===== UI 支撑 =====
@@ -524,10 +541,13 @@ class SParameterViewer_MainWin(QWidget):
                                       stop:0 #e7e8eb, stop:1 #cbcccf);
         }
         """
-        for btn in [self.open_button, self.save_button, self.diff_button,
-                    self.port_management_button, self.cascade_button,
-                    self.delete_button, self.analysis_btn, self.plot_button,
-                    self.ripple_btn, self.td_analysis_btn, self.read_button]:
+        buttons = [self.open_button, self.save_button, self.diff_button,
+                   self.port_management_button, self.cascade_button,
+                   self.delete_button, self.analysis_btn, self.plot_button,
+                   self.ripple_btn, self.read_button]
+        if self.td_analysis_btn is not None:
+            buttons.append(self.td_analysis_btn)
+        for btn in buttons:
             btn.setStyleSheet(button_style)
 
         self.file_list.setStyleSheet("""
@@ -542,50 +562,45 @@ class SParameterViewer_MainWin(QWidget):
         """)
 
     def write(self, text):
+        try:
+            self._append_output_signal.emit(str(text))
+        except RuntimeError:
+            if hasattr(self, '_original_stdout') and self._original_stdout:
+                self._original_stdout.write(str(text))
+
+    def _append_output_text(self, text):
         cursor = self.output_console.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertText(text)
         self.output_console.setTextCursor(cursor)
         self.output_console.ensureCursorVisible()
 
+    def flush(self):
+        pass
+
+    def _print_info(self, message):
+        if hasattr(self, 'output_console'):
+            self.write(message.rstrip() + "\n")
+        else:
+            print(message)
+
     def check_beta_period(self):
         return check_trial_permission(parent=self)
+
+    def prompt_usage_profile(self):
+        self.usage_tracker.ensure_profile(parent=self)
 
     def closeEvent(self, event):
         self.on_app_closing()
         super().closeEvent(event)
 
     def on_app_closing(self):
-        close_time = datetime.now()
-        usage_duration = str(close_time - self.start_time)
-        data_to_write = [self.user_name, self.start_time.strftime("%Y-%m-%d"), usage_duration]
-        print("写入使用日志:", data_to_write)
-        if sys.platform != 'win32':
-            self.write_usage_to_network_excel(
-                shared_folder=r"/data/Storage_pisi/w00810255/Qs",
-                filename="Quick_Sparam_usage_log.xlsx",
-                data=data_to_write
-            )
-
-    def write_usage_to_network_excel(self, shared_folder, filename, data):
-        unc_path = os.path.join(shared_folder, filename)
         try:
-            if os.path.exists(unc_path):
-                wb = load_workbook(unc_path)
-                ws = wb.active
-                if ws.max_row == 0 or ws.cell(row=1, column=1).value is None:
-                    ws.append(["用户名", "日期", "使用时长"])
-            else:
-                wb = Workbook()
-                ws = wb.active
-                ws.append(["用户名", "日期", "使用时长"])
-            ws.append(data)
-            wb.save(unc_path)
-            print(f"✅ 成功写入: {unc_path}")
+            self.usage_tracker.write_usage_log()
         except PermissionError:
-            print("❌ 无法写入文件，文件可能正在被其他用户打开。")
+            print("无法写入文件，文件可能正在被其他用户打开。")
         except Exception as e:
-            print(f"❌ 写入Excel失败: {e}")
+            print(f"写入Excel失败: {e}")
 
     # ===== 主界面功能 =====
 
@@ -612,25 +627,13 @@ class SParameterViewer_MainWin(QWidget):
                 show_error(self, "保存文件时出错")
 
     def info_version(self):
-        print("B2026版主要更新内容如下：")
-        items = [
-            "---功能增加",
-            "【试用权限】   新增基于Public/license.json的绝对日期限用与共享路径延期机制",
-            "【版本管理】   新增基于Public/version.json的版本检查，主界面显示后自动提醒更新",
-            "【文件列表】   新增完整路径/文件名显示模式切换，长路径文件可简化显示",
-            "【缓存管理】   新增S/Y/Z参数统一懒加载缓存、文件指纹校验和缓存调试开关",
-            "【数据复用】   频域分析、时域分析、纹波拟合和端口合并统一复用主窗口缓存数据",
-            "---交互体验",
-            "【版本信息】   当前版本号统一为2026.03，启动和“版本信息”按钮显示同一份更新说明",
-            "【文件列表】   显示文件名时仍保留真实文件路径，避免后续分析找不到原始文件",
-            "【频域分析】   修复文件名显示模式下指定线号、最差bit和XTSum等分析的数据访问问题",
-            "【时域分析】   修复文件名显示模式下端口选择与时域计算找不到网络数据的问题",
-            "【端口合并】   优化端口合并的Y参数读取流程，减少重复计算并保持缓存一致",
-            "【权限/更新】  共享授权和版本文件不可访问或格式异常时静默回退，不影响未过期用户启动",
-        ]
-        for text in items:
-            print(f"{text}")
-        print(f'\n版本持续迭代中，当前版本号为{self.version_num}')
+        print_version_info(self.version_num)
+
+    def open_feedback_dialog(self):
+        try:
+            show_feedback_dialog(self)
+        except Exception as e:
+            show_error(self, f"打开评价&反馈窗口出错: {str(e)}")
 
     def open_file_dialog(self):
         file_names, _ = QFileDialog.getOpenFileNames(
@@ -751,6 +754,8 @@ class SParameterViewer_MainWin(QWidget):
             w.setVisible(is_td)
         if is_td:
             self._refresh_td_defaults()
+            if not self.enable_time_domain:
+                self._print_info(_TIME_DOMAIN_UNAVAILABLE_MESSAGE)
         self._update_default_scales()
 
     def _refresh_td_defaults(self):
@@ -801,6 +806,9 @@ class SParameterViewer_MainWin(QWidget):
         label = f'{network.name}_S{p1},{p2}'
 
         # 时域：使用时间轴，提前返回
+        if param_type == '时域' and not self.enable_time_domain:
+            self._print_info(_TIME_DOMAIN_UNAVAILABLE_MESSAGE)
+            return None
         if param_type == '时域':
             td_mode_map = {'TDR阻抗': 'TDR', '阶跃响应': 'step',
                            '冲激响应': 'impulse', '脉冲响应': 'pulse'}
@@ -905,6 +913,11 @@ class SParameterViewer_MainWin(QWidget):
         return line
 
     def plot_s_parameters(self):
+        param_type = self.param_type_combo.currentText()
+        if param_type == '时域' and not self.enable_time_domain:
+            self._print_info(_TIME_DOMAIN_UNAVAILABLE_MESSAGE)
+            return
+
         selected_files = self.get_selected_file_keys()
         port1 = self.port1_input.text().strip()
         port2 = self.port2_input.text().strip()
@@ -926,6 +939,7 @@ class SParameterViewer_MainWin(QWidget):
         else:
             self.plot_history.append(new_plot_data)
 
+        plt = _get_pyplot()
         self.fig, self.ax = plt.subplots()
         if sys.platform == 'win32':
             plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -1040,6 +1054,7 @@ class SParameterViewer_MainWin(QWidget):
             QMessageBox.warning(self, '格式错误', '请输入如 "1~5" 的格式')
             return
 
+        plt = _get_pyplot()
         if sys.platform == 'win32':
             plt.rcParams['font.sans-serif'] = ['SimHei']
         else:
@@ -1489,10 +1504,15 @@ class SParameterViewer_MainWin(QWidget):
         dialog.exec()
 
     def call_frequency_analysis_dialog(self):
+        from dialogs.freq_analysis import frequencyAnalysisDialog
+
         dialog = frequencyAnalysisDialog(self.s_data, self)
         dialog.show()
 
     def call_time_domain_dialog(self):
+        if not self.enable_time_domain:
+            self._print_info(_TIME_DOMAIN_UNAVAILABLE_MESSAGE)
+            return
         from dialogs.time_domain import TimeDomainDialog
         dialog = TimeDomainDialog(self.s_data, self)
         dialog.show()

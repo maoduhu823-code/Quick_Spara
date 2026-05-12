@@ -9,14 +9,14 @@ class PortManagementDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("端口处理")
-        self.setFixedWidth(360)
+        self.setFixedWidth(440)
         self._setup_ui()
 
     def _setup_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(10)
 
-        meta_group = QGroupBox("元数据")
+        meta_group = QGroupBox("单点数据修改")
         meta_layout = QHBoxLayout()
         btn_names = QPushButton("编辑端口名")
         btn_names.clicked.connect(lambda: self.done(1))
@@ -36,7 +36,7 @@ class PortManagementDialog(QDialog):
         topo_layout.addWidget(btn_merge)
         topo_group.setLayout(topo_layout)
 
-        imp_group = QGroupBox("阻抗变换")
+        imp_group = QGroupBox("阻抗变换&拓扑变换")
         imp_layout = QHBoxLayout()
         btn_reduction = QPushButton("重归一化/端口缩并")
         btn_reduction.setToolTip(
@@ -45,6 +45,19 @@ class PortManagementDialog(QDialog):
         btn_reduction.clicked.connect(lambda: self.done(5))
         imp_layout.addWidget(btn_reduction)
         imp_group.setLayout(imp_layout)
+
+        help_text = (
+            "说明："
+            "<修改参考阻抗>只改端口Z_ref的数值，不改变S参数矩阵；\n"
+            "< 重归一化 > 会按新的参考阻抗重新计算S参数矩阵。\n"
+            "< 端口合并 > 用于把多个物理端口并联成一个等效端口；\n"
+            "< 端口缩并 > 用于将闲置端口按R/C条件端接后删除，降低端口数量。"
+        )
+        help_label = QLabel(help_text)
+        help_label.setWordWrap(True)
+        help_label.setStyleSheet(
+            "color: #4b5563; background: #f3f6fa; padding: 8px; "
+            "border: 1px solid #d6dde8; border-radius: 4px;")
 
         close_btn = QPushButton("关闭")
         close_btn.setFixedWidth(80)
@@ -56,6 +69,7 @@ class PortManagementDialog(QDialog):
         layout.addWidget(meta_group)
         layout.addWidget(topo_group)
         layout.addWidget(imp_group)
+        layout.addWidget(help_label)
         layout.addLayout(close_row)
         self.setLayout(layout)
 

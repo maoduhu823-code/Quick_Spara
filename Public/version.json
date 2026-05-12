@@ -1,7 +1,8 @@
 {
   "app": "Quick_Sparam",
-  "latest_version": "2026.04",
+  "latest_version": "2026.03",
   "title": "发现新版本",
-  "message": "检测到 Quick_Sparam 新版本：{latest_version}\n当前版本：{current_version}\n\n请到 \\\\10.114.193.143\\Public\\ 获取新版程序。",
+  "download_path": "\\\\10.114.193.143\\Public\\",
+  "message": "检测到 Quick_Sparam 新版本：{latest_version}\n当前版本：{current_version}\n\n请到下方路径获取新版程序。",
   "release_notes": []
 }

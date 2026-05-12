@@ -2,7 +2,6 @@ import sys
 import os
 import traceback
 import numpy as np
-import matplotlib.pyplot as plt
 from PyQt6.QtWidgets import QMessageBox, QDialog, QApplication
 
 
@@ -39,6 +38,11 @@ def resource_path(relative_path):
 
 # === 绘图辅助 ===
 
+def _get_pyplot():
+    import matplotlib.pyplot as plt
+    return plt
+
+
 def freq_band_data_extract(mark_freqGs, freqG, y_data, ax, worst_mode="max"):
     """在频段内标注极值点，返回标注点和极值点信息"""
     mark_info = []
@@ -67,6 +71,7 @@ def freq_band_data_extract(mark_freqGs, freqG, y_data, ax, worst_mode="max"):
 
 def plot_main_curves(results_data, data_mode):
     """绘制主曲线（原始曲线和拟合曲线）"""
+    plt = _get_pyplot()
     plt.figure()
     if sys.platform == 'win32':
         plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -94,6 +99,7 @@ def plot_main_curves(results_data, data_mode):
 
 def plot_residuals(results_data, data_mode):
     """绘制残差曲线"""
+    plt = _get_pyplot()
     plt.figure()
     if sys.platform == 'win32':
         plt.rcParams['font.sans-serif'] = ['SimHei']

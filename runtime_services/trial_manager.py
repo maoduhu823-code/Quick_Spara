@@ -13,8 +13,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import queue
 import socket
 import sys
+import threading
+import time as monotonic_time
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from urllib.request import Request, urlopen
@@ -41,7 +44,7 @@ LICENSE_SOURCES_BY_PLATFORM = {
         # 调试/本地部署：读取程序目录下 Public 文件夹中的授权文件。
         "Public/license.json",
         # 固定共享路径示例：需要时取消注释并改成你的公司共享路径。
-        # r"\\10.114.193.143\Public\license.json",
+        r"\\10.114.193.143\Public\license.json",
         
     ],
     "linux": [
@@ -76,8 +79,9 @@ DISABLED_DIALOG_TEXT = "当前版本已被管理员关闭使用权限，请联�
 CLOCK_ROLLBACK_DIALOG_TITLE = "系统时间异常"
 CLOCK_ROLLBACK_DIALOG_TEXT = "检测到系统时间早于上次运行时间，请校准系统时间后重新打开软件。"
 
-# 网络/HTTP 授权源读取超时时间，单位秒。共享文件路径不受该值影响。
-READ_TIMEOUT_SECONDS = 4
+# 授权源读取超时时间，单位秒；共享文件路径也受该值保护，避免拖慢启动。
+LICENSE_CHECK_TIMEOUT_SECONDS = 2
+READ_TIMEOUT_SECONDS = LICENSE_CHECK_TIMEOUT_SECONDS
 
 # 允许本机时间比上次运行时间提前多少分钟，超过则认为系统时间异常。
 CLOCK_ROLLBACK_TOLERANCE_MINUTES = 30
@@ -231,9 +235,13 @@ def _save_state(state_path: Path, state: dict[str, Any]) -> None:
 
 def _try_load_shared_license() -> dict[str, Any]:
     errors = []
+    deadline = monotonic_time.monotonic() + LICENSE_CHECK_TIMEOUT_SECONDS
     for source in _license_sources():
         try:
-            text = _read_text(source)
+            remaining = deadline - monotonic_time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"授权源检查总超时（>{LICENSE_CHECK_TIMEOUT_SECONDS:.1f}s）")
+            text = _read_text_with_timeout(source, remaining)
             data = json.loads(text)
             if data.get("app") not in (None, APP_NAME):
                 errors.append(f"{source}: app 不匹配")
@@ -242,6 +250,36 @@ def _try_load_shared_license() -> dict[str, Any]:
         except Exception as exc:
             errors.append(f"{source}: {exc}")
     return {"source": None, "data": None, "error": " | ".join(errors) if errors else None}
+
+
+def _read_text_with_timeout(source: str, timeout_seconds: float | None) -> str:
+    if timeout_seconds is None or timeout_seconds <= 0:
+        return _read_text(source)
+
+    result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+    def worker():
+        try:
+            result_queue.put_nowait((True, _read_text(source)))
+        except Exception as exc:
+            try:
+                result_queue.put_nowait((False, exc))
+            except queue.Full:
+                pass
+
+    thread = threading.Thread(target=worker, name="license-source-read", daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"读取授权源超时（>{timeout_seconds:.1f}s）")
+
+    try:
+        ok, value = result_queue.get_nowait()
+    except queue.Empty:
+        raise TimeoutError("读取授权源未返回结果")
+    if ok:
+        return value
+    raise value
 
 
 def _read_text(source: str) -> str:
@@ -273,7 +311,7 @@ def _resolve_file_source(source: str) -> Path:
 def _app_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parent.parent
 
 
 def _apply_license_data(
