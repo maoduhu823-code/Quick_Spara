@@ -2,14 +2,14 @@
 
 
 a = Analysis(
-    ['Quick_Sparam_install.py'],
+    ['Quick_Sparam_B.py'],
     pathex=[],
     binaries=[],
     datas=[('resources', 'resources')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['pyinstaller_hooks/set_limited_env.py'],
     excludes=[],
     noarchive=False,
     optimize=0,

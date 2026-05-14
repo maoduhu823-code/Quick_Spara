@@ -16,7 +16,8 @@
 ## 运行 / 打包
 
 ```bash
-python Quick_Sparam_B.py        # 生产入口
-python QSB_test.py              # 本地调试入口（不打包）
-pyinstaller Quick_Sparam_B.py   # 打包 exe
+python Quick_Sparam_B.py             # 完整版（空白启动）
+python Quick_Sparam_B.py --dev       # 调试预设（预填一组本机文件 + 端口）
+python Quick_Sparam_B.py --limited   # 精简版（关时域 + 跳过 usage profile）
+pyinstaller Quick_Sparam_install.spec  # 打包精简版 exe（runtime hook 注入 QS_LIMITED=1）
 ```

@@ -21,7 +21,7 @@ from sparam_core import (enforce_nonzero_z0,
                          merge_ports_multi, compute_time_domain)
 from QS_domain.algorithms.impedance import has_zero_impedance, replace_zero_impedance
 from QS_domain.display_config import FACET_OPTIONS as _FACET_OPTIONS, DEFAULT_SCALES as _DEFAULT_SCALES
-from app_utils import show_error, check_and_set_port_names, configure_matplotlib
+from app_utils import show_error, check_and_set_port_names, configure_matplotlib, attach_interactive_legend
 from QS_services.network_service import NetworkService, NetworkLoadError
 from QS_services.plotting_service import compute_param_data
 from QS_runtime_services.trial_manager import check_trial_permission
@@ -609,12 +609,14 @@ class SParameterViewer_MainWin(QWidget):
 
     def on_curve_click(self, event):
         if event.artist not in self.plot_lines:
-            print('No line data')
             return
-        line = event.artist
+        self._select_curve(event.artist)
+
+    def _select_curve(self, line):
+        """点曲线本体或 legend 条目都走这里——高亮 + 打印 + 重绘。"""
         self.highlight_curve(line)
         self.print_curve_info(line)
-        self.fig.canvas.draw()
+        self.fig.canvas.draw_idle()
 
     def highlight_curve(self, selected_line):
         for line in self.plot_lines:
@@ -879,7 +881,10 @@ class SParameterViewer_MainWin(QWidget):
                     fontsize=10, color='gray', va='bottom', ha='left',
                     bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.6, ec='none')
                 )
-            self.ax.legend()
+            attach_interactive_legend(
+                self.ax, lines=self.plot_lines,
+                on_legend_pick=self._select_curve,
+            )
             if hasattr(self, '_cid'):
                 self.fig.canvas.mpl_disconnect(self._cid)
             self._cid = self.fig.canvas.mpl_connect('pick_event', self.on_curve_click)

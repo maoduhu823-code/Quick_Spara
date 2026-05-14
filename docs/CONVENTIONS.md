@@ -57,10 +57,14 @@ python -m pytest tests/ -q      # 提交前必跑（~75 项）
 
 ## §打包 / 资源路径
 
-- 打包工具：`auto-py-to-exe` 或直接 `pyinstaller Quick_Sparam_B.py`。
+- 打包工具：`auto-py-to-exe` 或直接 `pyinstaller Quick_Sparam_install.spec`（精简版）/ `pyinstaller Quick_Sparam_B.py`（完整版）。
 - 任何需要在打包后访问的资源（图标、模板、文档），必须用 `app_utils.resource_path("relative/path")` 包装，否则在冻结环境下找不到（依赖 `sys._MEIPASS`）。
 - 资源放在仓库根的 `resources/`（图标如 `resources/ico_test.ico`）或对应目录；通过 PyInstaller spec 的 `datas` 加入即可。
-- `QSB_test.py` 是本地调试入口，**不要**进 PyInstaller 打包列表。
+- 入口是统一的 `Quick_Sparam_B.py`，三组旗标互不冲突：
+  - `--dev`：开发预设（预填一组本机文件/端口），仅命令行生效，冻结后不触发。
+  - `--limited` 或环境变量 `QS_LIMITED=1`：精简版（关时域 + 跳过 usage profile）。
+  - PyInstaller 精简版打包通过 `Quick_Sparam_install.spec` 的 `runtime_hooks=['pyinstaller_hooks/set_limited_env.py']` 在 exe 启动时强制 `QS_LIMITED=1`。
+- `pyinstaller_hooks/` 目录必须随发布包一起进 PyInstaller spec，否则精简版 exe 启动会退回完整版。
 
 ---
 

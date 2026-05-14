@@ -17,7 +17,13 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(python *)",
-      "Bash(git restore *)"
+      "Bash(git restore *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\33202\\\\PycharmProjects\\\\Quick_Sparam\" -Recurse -Force)",
+      "Bash(Select-Object -Property FullName, PSIsContainer)",
+      "Bash(Sort-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\33202\\\\PycharmProjects\\\\Quick_Sparam\" -Recurse | ForEach-Object { if \\($_.PSIsContainer\\) { \"$\\($_.FullName\\)/\" } else { $_.FullName } } | Sort-Object)",
+      "Bash(cd /d C:\\\\Users\\\\33202\\\\PycharmProjects\\\\Quick_Sparam)",
+      "Bash(rtk git *)"
     ]
   }
 }

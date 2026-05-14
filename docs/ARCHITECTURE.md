@@ -9,9 +9,10 @@
 
 ```
 Quick_Sparam/
-├── Quick_Sparam_B.py            (26)    生产入口：QApplication + 试用校验 + 启动后续
-├── QSB_test.py                  (31)    本地调试入口，不进 PyInstaller
-├── Quick_Sparam_install.py      (31)    安装脚本
+├── Quick_Sparam_B.py            (58)    统一入口：无参=完整版；--dev 调试预设；--limited / QS_LIMITED=1 精简版
+├── Quick_Sparam_install.pyw     ( 9)    精简版双击启动器（注入 QS_LIMITED=1 后委派给 Quick_Sparam_B.main）
+├── Quick_Sparam_install.spec    (45)    PyInstaller 配置（指向 Quick_Sparam_B.py + runtime hook）
+├── pyinstaller_hooks/                   PyInstaller runtime hook：冻结后强制 QS_LIMITED=1
 ├── main_window.py             (1216)    SParameterViewer_MainWin（仍在瘦身）
 ├── app_utils.py                (131)    Qt 工具层（错误弹窗、字体、绘图辅助）
 ├── sparam_core.py               (45)    向后兼容 shim — 只做 re-export

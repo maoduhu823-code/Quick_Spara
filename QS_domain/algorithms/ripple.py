@@ -39,15 +39,27 @@ def ripple_calc(
 
     mask = (freqG >= start_freqG) & (freqG <= stop_freqG)
     freqG_range = freqG[mask]
+    if freqG_range.size == 0:
+        raise ValueError("所选频率范围内没有数据点")
 
     if data_mode == "幅度 (dB)":
         s_param_range = 20 * np.log10(np.abs(s_param[mask]))
     elif data_mode == "幅度 (abs)":
         s_param_range = np.abs(s_param[mask])
+    elif data_mode == "相位 (度)":
+        s_param_range = np.angle(s_param[mask]) * 180 / np.pi
+    elif data_mode == "相位 (rad)":
+        s_param_range = np.angle(s_param[mask])
     elif data_mode == "unwrap相位 (度)":
         s_param_range = np.unwrap(np.angle(s_param[mask])) * 180 / np.pi
     elif data_mode == "unwrap相位 (rad)":
         s_param_range = np.unwrap(np.angle(s_param[mask]))
+    elif data_mode == "群延迟 (fs)":
+        if freqG_range.size < 2:
+            raise ValueError("群延迟拟合至少需要两个频点")
+        phase = np.unwrap(np.angle(s_param[mask]))
+        omega = 2 * np.pi * network.f[mask]
+        s_param_range = -np.gradient(phase, omega) * 1e15
     else:
         raise ValueError(f"暂不支持该类型数据拟合: {data_mode}")
 

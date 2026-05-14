@@ -10,12 +10,12 @@
 
 ## 一、项目一句话定位
 
-Quick_Sparam 是基于 **PyQt6** 的 RF S 参数（Touchstone `.snp`）查看与分析桌面工具，由"封装SIPI开发部"维护。生产入口 `Quick_Sparam_B.py`，本地调试入口 `QSB_test.py`，使用 PyInstaller 打包为单 exe 分发。
+Quick_Sparam 是基于 **PyQt6** 的 RF S 参数（Touchstone `.snp`）查看与分析桌面工具，由"封装SIPI开发部"维护。统一入口 `Quick_Sparam_B.py`（生产空白启动，加 `--dev` 走本地调试预设），使用 PyInstaller 打包为单 exe 分发。
 
 ## 二、分层概览（最少必读）
 
 ```
-Quick_Sparam_B.py / QSB_test.py     # 应用入口
+Quick_Sparam_B.py                   # 应用入口（无参=生产，--dev=本地调试预设）
 main_window.py                      # 主窗口（瘦身中，仍 ~1216 行）
 app_utils.py                        # Qt 工具：错误弹窗、字体配置、绘图辅助
 sparam_core.py                      # 向后兼容 shim — 不要在新代码里 import

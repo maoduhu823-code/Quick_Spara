@@ -86,6 +86,20 @@ class TestRippleCalc:
         assert result['formula'] is None
         assert result['residuals'] is not None
 
+    @pytest.mark.parametrize("data_mode", [
+        "幅度 (dB)",
+        "幅度 (abs)",
+        "相位 (度)",
+        "相位 (rad)",
+        "unwrap相位 (度)",
+        "unwrap相位 (rad)",
+        "群延迟 (fs)",
+    ])
+    def test_ui_data_modes_are_supported(self, data_mode):
+        result = ripple_calc(self.ntwk, 1, 2, 1.0, 10.0,
+                             data_mode, "n次多项式", {'order': 3})
+        assert result['s_param_range'].shape == result['freqG_range'].shape
+
     def test_unsupported_data_mode_raises(self):
         with pytest.raises(ValueError, match="暂不支持"):
             ripple_calc(self.ntwk, 1, 2, 1.0, 10.0,
