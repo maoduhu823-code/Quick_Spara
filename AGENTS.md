@@ -1,62 +1,21 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
-See also: `CLAUDE.md` (Claude Code guidance, kept in sync).
+> Quick_Sparam 的 AI 协作上下文统一维护在 [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md)。
+> 本文件（供 Codex 等智能体加载）只保留最小硬约束，正文一律到 AGENT_GUIDE.md 查阅。
+> 与 `CLAUDE.md` 内容相同；之所以保留两份指针，是因为不同智能体默认加载的文件名不同。
 
-## Project Overview
+## 硬约束
 
-Quick_Sparam is a PyQt6-based desktop GUI application for viewing and analyzing RF S-parameter files (Touchstone `.snp` format). Developed by 封装SIPI开发部.
+- `QS_domain/` 与 `QS_services/` 内禁止 `import PyQt6`
+- 禁止在模块级调用 `matplotlib.use(...)`
+- UI 字符串简体中文；字体配置走 `app_utils.configure_matplotlib()`
+- 新算法放进 `QS_domain/algorithms/`；`sparam_core.py` 仅作向后兼容 shim
+- 提交前 `python -m pytest tests/ -q`
+- `QS_runtime_services/` 不要改
 
-## Running the Application
+## 运行
 
 ```bash
-python Quick_Sparam_B.py
+python Quick_Sparam_B.py        # 生产入口
+python QSB_test.py              # 本地调试入口（不打包）
 ```
-
-## Architecture (current state after refactor Phase 1–3)
-
-```
-Quick_Sparam/
-├── Quick_Sparam_B.py           # Production entry
-├── QSB_test.py                 # Local debug entry (not packaged)
-├── main_window.py              # Main window (~1 390 lines, under active slimming)
-├── sparam_core.py              # Backward-compat re-export shim
-├── app_utils.py                # Qt utility layer (error dialogs, port name UI, plotting helpers)
-│
-├── QS_domain/                  # Domain layer — pure Python, no Qt/network
-│   ├── algorithms/             # ripple.py, se2diff.py, time_domain.py, impedance.py, port_merge.py
-│   ├── display_config.py       # Unified FACET_OPTIONS + DEFAULT_SCALES (single source of truth)
-│   ├── enums.py                # ParamType, DisplayMode, FitMethod
-│   └── port_parser.py          # parse_port_input (merged, single implementation)
-│
-├── QS_services/                # Application layer — no Qt
-│   ├── network_service.py      # NetworkService + NetworkLoadError
-│   └── plotting_service.py     # Data transformation (compute_param_data)
-│
-├── QS_infra/                   # Infrastructure layer
-│   ├── cache.py                # NetworkCache (fingerprint-based)
-│   └── resource_path.py        # PyInstaller path resolver
-│
-├── QS_dialogs/                 # UI dialogs (Qt)
-│   ├── cascade.py, se2diff.py, port_reduction.py, port_reorder.py
-│   ├── port_merge.py, port_management.py, port_selector.py, port_name.py
-│   ├── ripple.py               # Accepts network_service injection (decoupled from parent)
-│   ├── freq_analysis.py        # Heavy dialog (~1 800 lines)
-│   ├── time_domain.py
-│   └── loading.py
-│
-├── QS_runtime_services/        # License, usage tracking, feedback (do not modify)
-│
-├── samples/                    # Sample .snp files used by tests and docs
-├── tests/                      # pytest suite (75 tests)
-│   ├── domain/, infra/, services/, compat/
-└── dev_scripts/                # Standalone validation/smoke scripts (not pytest)
-```
-
-## Key Rules
-
-- **No PyQt6 in QS_domain/ or QS_services/** — violations are caught by the test suite
-- **sparam_core.py** is a shim; all logic lives in QS_domain/
-- Never call `matplotlib.use()` at module level — Qt5Agg + PyQt6 conflict
-- All UI strings are Simplified Chinese
-- Run `python -m pytest tests/ -q` before committing
