@@ -352,16 +352,47 @@ class SParameterViewer_MainWin(QWidget):
         plot_right_layout.addWidget(self._td_dt_lbl,  6, 2)
         plot_right_layout.addWidget(self._td_dt_edit, 6, 3)
 
+        # Z0 与 UI宽度 共用 (7,0)/(7,1) 槽位，按 facet 互斥显示：
+        #   TDR阻抗 → Z0；脉冲响应 → UI宽度
         self._td_z0_lbl = QLabel("Z0 (Ω):")
         self._td_z0_edit = QLineEdit("50")
         self._td_z0_edit.setFixedWidth(65)
         plot_right_layout.addWidget(self._td_z0_lbl,  7, 0)
         plot_right_layout.addWidget(self._td_z0_edit, 7, 1)
 
+        self._td_pw_lbl = QLabel("UI宽度 (ps):")
+        self._td_pw_edit = QLineEdit("750")
+        self._td_pw_edit.setFixedWidth(65)
+        self._td_pw_edit.setToolTip(
+            "脉冲响应的 UI 宽度 (单位间隔, Unit Interval)。\n"
+            "默认 = 30 × t_step；若上方'关注频点'有输入，"
+            "取首项 f₀ 的奈奎斯特周期 1/(2f₀) 作为默认。\n"
+            "切到时域时自动刷新一次，之后由用户自由编辑。"
+        )
+        plot_right_layout.addWidget(self._td_pw_lbl,  7, 0)
+        plot_right_layout.addWidget(self._td_pw_edit, 7, 1)
+
+        self._td_win_lbl = QLabel("频域窗:")
+        self._td_win_combo = QComboBox()
+        self._td_win_combo.addItems(
+            ["高斯", "矩形", "汉宁", "汉明", "布莱克曼", "Tukey", "Kaiser"])
+        self._td_win_combo.setToolTip(
+            "高斯：最小时带积，无旁瓣（默认）；\n"
+            "矩形：分辨率最高，旁瓣最大（sinc 振铃）；\n"
+            "汉宁/汉明/布莱克曼：旁瓣依次递减、主瓣依次变宽；\n"
+            "Tukey：中段平坦+两端余弦过渡，抑制末端绕回；\n"
+            "Kaiser(β=6)：可调主瓣/旁瓣折中。\n"
+            "所有窗都以上升沿 tr 对应的带宽 0.35/tr 为截止频率。"
+        )
+        plot_right_layout.addWidget(self._td_win_lbl,   7, 2)
+        plot_right_layout.addWidget(self._td_win_combo, 7, 3)
+
         self._xy_widgets = [self._xlbl, self.xscale_combo, self._ylbl, self.yscale_combo]
         self._td_widgets = [self._td_tr_lbl, self._td_tr_edit,
                             self._td_dt_lbl, self._td_dt_edit,
-                            self._td_z0_lbl, self._td_z0_edit]
+                            self._td_z0_lbl, self._td_z0_edit,
+                            self._td_pw_lbl, self._td_pw_edit,
+                            self._td_win_lbl, self._td_win_combo]
 
         self.legend_checkbox = QCheckBox("显示图例")
         self.legend_checkbox.setChecked(True)
@@ -660,7 +691,12 @@ class SParameterViewer_MainWin(QWidget):
         self._update_default_scales()
 
     def _refresh_td_defaults(self):
-        """根据当前选中文件自动设置 t_rise / t_step 的合理默认值。"""
+        """根据当前选中文件自动设置 t_step / t_rise / UI宽度 的默认值。
+
+        - t_step = max(td_default_params['dt_ps'])  （Nyquist 上限）
+        - t_rise = 3 × t_step
+        - UI宽度 = 30 × t_step，若'关注频点'有输入则取首项 1/(2f₀) ps
+        """
         from sparam_core import td_default_params
         selected = self.get_selected_file_keys()
         if not selected:
@@ -670,21 +706,37 @@ class SParameterViewer_MainWin(QWidget):
             return
         try:
             defs = [td_default_params(n) for n in networks]
-            tr = max(d['tr_ps'] for d in defs)
             dt = max(d['dt_ps'] for d in defs)
-            self._td_tr_edit.setText(f'{tr:.2f}')
             self._td_dt_edit.setText(f'{dt:.2f}')
+            self._td_tr_edit.setText(f'{3 * dt:.2f}')
+            self._td_pw_edit.setText(f'{self._compute_pulse_width_default(dt):.2f}')
         except Exception:
             pass
+
+    def _compute_pulse_width_default(self, dt_ps: float) -> float:
+        """UI宽度默认：'关注频点'有输入取首项 f₀ 的奈奎斯特周期 1/(2f₀) ps；否则 30 × dt。"""
+        txt = self.freG_input.text().strip() if hasattr(self, 'freG_input') else ''
+        if txt:
+            try:
+                first_token = txt.split()[0]
+                f0_GHz = float(first_token)
+                if f0_GHz > 0:
+                    return 500.0 / f0_GHz   # 1/(2·f₀) 秒 = 500/f₀ ps（f₀ in GHz）
+            except (ValueError, IndexError):
+                pass
+        return 30.0 * dt_ps
 
     def _update_default_scales(self):
         param_type = self.param_type_combo.currentText()
         facet = self.facet_combo.currentText()
         if param_type == '时域':
-            # Z0 仅对 TDR 有意义，其余模式置灰
-            is_tdr = (facet == 'TDR阻抗')
-            self._td_z0_lbl.setEnabled(is_tdr)
-            self._td_z0_edit.setEnabled(is_tdr)
+            # Z0 / UI宽度 共用槽位，按 facet 互斥显示
+            is_tdr   = (facet == 'TDR阻抗')
+            is_pulse = (facet == '脉冲响应')
+            self._td_z0_lbl.setVisible(is_tdr)
+            self._td_z0_edit.setVisible(is_tdr)
+            self._td_pw_lbl.setVisible(is_pulse)
+            self._td_pw_edit.setVisible(is_pulse)
             return
         xscale, yscale = _DEFAULT_SCALES.get((param_type, facet), ('线性', '线性'))
         self.xscale_combo.setCurrentText(xscale)
@@ -725,9 +777,21 @@ class SParameterViewer_MainWin(QWidget):
                 _z0 = float(self._td_z0_edit.text())
             except ValueError:
                 _z0 = 50.0
+            try:
+                _pw = float(self._td_pw_edit.text())
+            except ValueError:
+                _pw = None
+            _WIN_MAP = {
+                "高斯": "gaussian", "矩形": "rect", "汉宁": "hanning",
+                "汉明": "hamming",  "布莱克曼": "blackman",
+                "Tukey": "tukey",   "Kaiser": "kaiser",
+            }
+            _win = _WIN_MAP.get(self._td_win_combo.currentText(), "gaussian")
             result = compute_time_domain(
                 network, p1, p2, td_mode_map.get(facet, 'TDR'),
                 tr_ps=_tr, dt_ps=_dt, z0=_z0,
+                pulse_width_ps=_pw,
+                window_type=_win,
                 s_params=self.get_param_matrix(file_name, 'S参数')
             )
             x_td = result["time_ps"]

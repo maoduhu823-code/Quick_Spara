@@ -16,8 +16,8 @@ LIMITED_MODE = ('--limited' in sys.argv) or (os.environ.get('QS_LIMITED') == '1'
 def _apply_dev_preset(viewer):
     """--dev 启动时预填一组本机调试用例。命令行没有该旗标的环境（包括冻结的 exe）绝不会触发。"""
     viewer.file_list.addItem('C:/Users/33202/Desktop/HFSS script/StackupDemo1_test.s4p')
-    viewer.port1_input.setText("1 1")
-    viewer.port2_input.setText("3 1")
+    viewer.port1_input.setText("1")
+    viewer.port2_input.setText("3")
 
 
 def main():
