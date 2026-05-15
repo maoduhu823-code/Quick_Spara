@@ -72,6 +72,7 @@ def _td_impulse_response(freq_full: np.ndarray, s_full: np.ndarray,
     """计算冲激响应（内部函数）。freq_full 必须从 f=0 开始，间距为 df。
 
     window_type : "gaussian" | "rect" | "hanning" | "hamming" | "blackman"
+                  | "tukey" | "kaiser"
     """
     df_Hz = freq_full[1] if len(freq_full) > 1 else freq_full[-1]
 
@@ -86,6 +87,22 @@ def _td_impulse_response(freq_full: np.ndarray, s_full: np.ndarray,
     elif window_type == "blackman":
         W = np.where(freq_full <= sigma_f,
                      0.42 + 0.5 * np.cos(x) + 0.08 * np.cos(2.0 * x), 0.0)
+    elif window_type == "tukey":
+        # 单边 Tukey：[0, (1-α)·σ_f] 平坦=1，过渡区余弦衰减到 0
+        alpha = 0.5
+        f_norm = freq_full / sigma_f
+        W = np.zeros_like(freq_full, dtype=float)
+        flat = f_norm <= (1.0 - alpha)
+        taper = (f_norm > (1.0 - alpha)) & (f_norm <= 1.0)
+        W[flat] = 1.0
+        W[taper] = 0.5 * (1.0 + np.cos(
+            np.pi * (f_norm[taper] - (1.0 - alpha)) / alpha))
+    elif window_type == "kaiser":
+        # 单边 Kaiser：W(f) = I0(β·√(1-(f/σ_f)²)) / I0(β)，f ≤ σ_f
+        beta = 6.0
+        f_norm = np.clip(freq_full / sigma_f, 0.0, 1.0)
+        arg = beta * np.sqrt(np.clip(1.0 - f_norm ** 2, 0.0, None))
+        W = np.where(freq_full <= sigma_f, np.i0(arg) / np.i0(beta), 0.0)
     else:  # gaussian（默认）
         W = np.exp(-0.5 * (freq_full / sigma_f) ** 2)
 
@@ -128,6 +145,7 @@ def compute_time_domain(
 
     waveform    : "TDR" | "impulse" | "step" | "pulse"
     window_type : "gaussian" | "rect" | "hanning" | "hamming" | "blackman"
+                  | "tukey" | "kaiser"
 
     返回 {"time_ps", "y_data", "label", "y_label", "compat_status"}
     """
@@ -152,10 +170,27 @@ def compute_time_domain(
 
     compat = td_compat_check(network, tr_ps, dt_ps, n_points)
 
-    s_dc = 0.0 if (p1 == p2) else 1.0
+    # DC 外推：用前 K 点二次多项式拟合外推 Re(S(0))，强制 Im(S(0))=0
+    # （因果实信号要求 S(0) ∈ ℝ；保留虚部连续过渡可抑制末端振铃和 t=0 偏移）
     if freq_orig[0] > 0:
         N_dc = max(1, round(freq_orig[0] / df_Hz))
-        dc_part = np.linspace(s_dc, np.real(s_orig[0]), N_dc) + 0j
+        K = min(5, len(s_orig))
+        deg = min(2, K - 1) if K >= 2 else 0
+        re_coef = np.polyfit(freq_orig[:K], np.real(s_orig[:K]), deg)
+        re_dc_val = float(np.clip(np.polyval(re_coef, 0.0), -1.0, 1.0))
+
+        f_grid = np.arange(N_dc) * df_Hz
+        if N_dc == 1:
+            dc_re = np.array([re_dc_val])
+            dc_im = np.array([0.0])
+        else:
+            t = f_grid / freq_orig[0]                       # 0 → ~1
+            re_start = float(np.real(s_orig[0]))
+            im_start = float(np.imag(s_orig[0]))
+            dc_re = (1.0 - t) * re_dc_val + t * re_start    # 实部线性混合
+            dc_im = t * im_start                            # 虚部从 0 平滑过渡
+
+        dc_part = dc_re + 1j * dc_im
         s_full = np.concatenate([dc_part, s_orig])
         freq_full = np.arange(len(s_full)) * df_Hz
     else:

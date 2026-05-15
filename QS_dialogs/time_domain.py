@@ -137,10 +137,13 @@ class TimeDomainDialog(QDialog):
         # 频域窗
         grid.addWidget(QLabel("频域窗:"), 3, 0)
         self._win_combo = QComboBox()
-        self._win_combo.addItems(["高斯", "矩形", "汉宁", "汉明", "布莱克曼"])
+        self._win_combo.addItems(
+            ["高斯", "矩形", "汉宁", "汉明", "布莱克曼", "Tukey", "Kaiser"])
         self._win_combo.setToolTip(
             "高斯：最小时带积，无旁瓣；矩形：分辨率最高但旁瓣大；\n"
-            "汉宁/汉明/布莱克曼：旁瓣依次递减，分辨率依次降低。\n"
+            "汉宁/汉明/布莱克曼：旁瓣依次递减，分辨率依次降低；\n"
+            "Tukey：中段平坦+两端余弦过渡，分辨率好且抑制末端振铃；\n"
+            "Kaiser(β=6)：可调主瓣/旁瓣折中，振铃抑制最强。\n"
             "所有窗均以上升沿参数 tr 对应的带宽为截止频率。"
         )
         grid.addWidget(self._win_combo, 3, 1)
@@ -407,6 +410,7 @@ class TimeDomainDialog(QDialog):
         _WIN_MAP = {
             "高斯": "gaussian", "矩形": "rect", "汉宁": "hanning",
             "汉明": "hamming",  "布莱克曼": "blackman",
+            "Tukey": "tukey",   "Kaiser": "kaiser",
         }
         window_type = _WIN_MAP.get(self._win_combo.currentText(), "gaussian")
 
