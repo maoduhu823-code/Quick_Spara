@@ -27,7 +27,7 @@ Quick_Sparam/
 │       ├── se2diff.py          (175)    单端→差分/混合模式转换（3 个公共函数）
 │       ├── time_domain.py      (305)    时域变换（TDR / step / impulse / pulse）+ suggest_time_window
 │       ├── port_merge.py        (46)    端口并联合并
-│       └── topology_detect.py  (330)    多端口 TX↔RX 配对识别（低频 Y 连通 + mid-band IL hub + 群延迟）
+│       └── topology_detect.py  (330)    1 驱 1 端口对识别（低频 Y 矩阵互为最强）
 │
 ├── QS_services/                          应用服务层（禁止 PyQt6）
 │   ├── network_service.py       (73)    NetworkService + NetworkLoadError

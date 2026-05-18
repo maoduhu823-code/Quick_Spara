@@ -106,11 +106,11 @@ def merge_ports_multi(ntw, merge_groups: list[list[int]],
 @dataclass
 class ChannelInfo:
     ports: list[int]              # 1-based 端口号
-    tx: int | None                # hub / 驱动端（行和最大）
-    rxs: list[int]                # 按群延迟从近到远
-    delays_ns: list[float]        # 与 rxs 一一对应，TX→RX_k 的群延迟
-    il_db: list[float]            # 与 rxs 一一对应，mid-band 平均 |S| 的 dB
-    topology: str                 # "p2p" | "star" | "multi-drop" | "unknown"
+    tx: int | None                # 低序号端口
+    rxs: list[int]                # 仅包含高序号端口
+    s_value: complex | None       # 识别频点上的 S(低序号, 高序号)
+    z_value: complex | None       # 识别频点上的 Z(低序号, 高序号)
+    topology: str                 # 当前固定为 "p2p"
 
 @dataclass
 class TopologyReport:
@@ -125,9 +125,10 @@ class TopologyReport:
 def detect_topology(network, low_freq_ghz=0.1, band_ghz=None,
                     y_threshold_siemens=5e-4, s_threshold_db=-25.0,
                     delay_tolerance_ns=0.1) -> TopologyReport
-# 流水线：低频 Y 阈值化连通图 → BFS 连通分量 → 分量>2 时 hub=|S| 行和最大者
-# → 群延迟排序 RX → 三角不等式判别 star / multi-drop
-# band_ghz=None 时自动取频率轴 [10%, 60%] 区间
+# 当前仅识别 1 驱 1：低频 S→Y 后，每个端口选 |Y_ij| 最大的另一端口；
+# 互为最强关系才输出为联通端口对（小序号 -> 大序号）。
+# low_freq_ghz 使用最接近输入频点的实际频点。
+# band_ghz / y_threshold_siemens / s_threshold_db / delay_tolerance_ns 为兼容参数，本版不参与判别。
 
 def format_report(report: TopologyReport, file_label: str = "") -> str
 ```

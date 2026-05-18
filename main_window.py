@@ -20,6 +20,7 @@ from sparam_core import (enforce_nonzero_z0,
                          SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,
                          merge_ports_multi, compute_time_domain)
 from QS_domain.algorithms.impedance import has_zero_impedance, replace_zero_impedance
+from QS_domain.algorithms.time_domain import suggest_time_window
 from QS_domain.display_config import FACET_OPTIONS as _FACET_OPTIONS, DEFAULT_SCALES as _DEFAULT_SCALES
 from app_utils import show_error, check_and_set_port_names, configure_matplotlib, attach_interactive_legend
 from QS_services.network_service import NetworkService, NetworkLoadError
@@ -415,6 +416,7 @@ class SParameterViewer_MainWin(QWidget):
         plot_right_layout.addWidget(QLabel("关注频点:"), 5, 2)
         self.freG_input = QLineEdit("")
         self.freG_input.setPlaceholderText("GHz")
+        self.freG_input.editingFinished.connect(self._refresh_td_defaults_if_td)
         plot_right_layout.addWidget(self.freG_input, 5, 3)
 
         plot_layout.addLayout(plot_left_layout, stretch=2)
@@ -704,32 +706,44 @@ class SParameterViewer_MainWin(QWidget):
     def _refresh_td_defaults(self):
         """根据当前选中文件自动设置 t_step / t_rise / UI宽度 的默认值。
 
-        - t_step = max(td_default_params['dt_ps'])  （Nyquist 上限）
+        - t_step = 1 / (2 × 当前频域数据最高频率)
         - t_rise = 3 × t_step
         - UI宽度 = 30 × t_step，若'关注频点'有输入则取首项 1/(2f₀) ps
         """
-        from sparam_core import td_default_params
         selected = self.get_selected_file_keys()
         if not selected:
             selected = self.get_all_file_keys()
-        networks = [self.s_data[f] for f in selected if f in self.s_data]
+        networks = []
+        for file_name in selected:
+            try:
+                network = self.get_network(file_name)
+            except Exception:
+                network = None
+            if network is not None and len(network.f) > 0:
+                networks.append(network)
         if not networks:
             return
         try:
-            defs = [td_default_params(n) for n in networks]
-            dt = max(d['dt_ps'] for d in defs)
+            fmax_hz = max(float(np.max(n.f)) for n in networks)
+            if fmax_hz <= 0:
+                return
+            dt = 1e12 / (2.0 * fmax_hz)
             self._td_dt_edit.setText(f'{dt:.2f}')
             self._td_tr_edit.setText(f'{3 * dt:.2f}')
-            self._td_pw_edit.setText(f'{self._compute_pulse_width_default(dt):.2f}')
+            self._td_pw_edit.setText(f'{self._compute_pulse_width_default(dt):.1f}')
         except Exception:
             pass
+
+    def _refresh_td_defaults_if_td(self):
+        if self.param_type_combo.currentText() == '时域':
+            self._refresh_td_defaults()
 
     def _compute_pulse_width_default(self, dt_ps: float) -> float:
         """UI宽度默认：'关注频点'有输入取首项 f₀ 的奈奎斯特周期 1/(2f₀) ps；否则 30 × dt。"""
         txt = self.freG_input.text().strip() if hasattr(self, 'freG_input') else ''
         if txt:
             try:
-                first_token = txt.split()[0]
+                first_token = txt.replace(',', ' ').replace('，', ' ').split()[0]
                 f0_GHz = float(first_token)
                 if f0_GHz > 0:
                     return 500.0 / f0_GHz   # 1/(2·f₀) 秒 = 500/f₀ ps（f₀ in GHz）
@@ -817,6 +831,13 @@ class SParameterViewer_MainWin(QWidget):
             line.data_mode = f'{param_type} {facet}'
             line.freq_data = x_td
             line.value_data = y_td
+            h_t = result.get("impulse_h_t")
+            dt_s = result.get("dt_s")
+            if h_t is not None and dt_s:
+                lo_s, hi_s = suggest_time_window(
+                    h_t, dt_s, waveform=td_mode_map.get(facet, 'TDR'))
+                if hi_s > lo_s:
+                    line.td_xlim_s = (lo_s, hi_s)
             return line
 
         param = szy_params[:, p1 - 1, p2 - 1]
@@ -861,6 +882,19 @@ class SParameterViewer_MainWin(QWidget):
                 else:
                     print('关注频点超出现有的频率数据，无法进行数据统计')
         return line
+
+    def _apply_main_td_auto_xlim(self):
+        """主 UI 时域绘图默认按冲激响应活动区间收紧时间轴。"""
+        candidates = [
+            line.td_xlim_s for line in self.plot_lines
+            if line is not None and hasattr(line, 'td_xlim_s')
+        ]
+        if not candidates:
+            return
+        lo_s = min(c[0] for c in candidates)
+        hi_s = max(c[1] for c in candidates)
+        if hi_s > lo_s:
+            self.ax.set_xlim(lo_s * 1e12, hi_s * 1e12)
 
     def plot_s_parameters(self):
         param_type = self.param_type_combo.currentText()
@@ -956,6 +990,8 @@ class SParameterViewer_MainWin(QWidget):
                     fontsize=10, color='gray', va='bottom', ha='left',
                     bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.6, ec='none')
                 )
+            if param_type == '时域':
+                self._apply_main_td_auto_xlim()
             attach_interactive_legend(
                 self.ax, lines=self.plot_lines,
                 on_legend_pick=self._select_curve,
@@ -1504,22 +1540,14 @@ class SParameterViewer_MainWin(QWidget):
         dialog.show()
 
     def call_topology_detect(self):
-        """对每个选中的文件运行拓扑识别并打印报告。"""
-        from QS_domain.algorithms.topology_detect import detect_topology, format_report
+        """打开拓扑识别参数对话框。"""
+        from QS_dialogs.topology_detect import TopologyDetectDialog
         try:
             selected = self.get_selected_file_keys()
             if not selected:
                 QMessageBox.warning(self, '错误', '请先选择文件！')
                 return
-            for file_name in selected:
-                network = self.get_network(file_name)
-                if network is None:
-                    print(f"[拓扑识别] 未找到网络: {file_name}")
-                    continue
-                if network.nports < 2:
-                    print(f"[拓扑识别] {file_name} 端口数 < 2，跳过")
-                    continue
-                report = detect_topology(network)
-                print(format_report(report, file_label=os.path.basename(file_name)))
+            self._topology_dialog = TopologyDetectDialog(selected, self.get_network, self)
+            self._topology_dialog.show()
         except Exception:
             show_error(self, "拓扑识别出错")
