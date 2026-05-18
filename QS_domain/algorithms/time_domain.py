@@ -122,6 +122,76 @@ def _td_step_response(h_t: np.ndarray) -> np.ndarray:
     return np.cumsum(h_t)
 
 
+def suggest_time_window(
+        h_t: np.ndarray,
+        dt_s: float,
+        waveform: str = "impulse",
+        threshold_factor: float = 0.01,
+        left_pad_frac: float = 0.1,
+        right_pad_factor_by_wf: dict | None = None,
+) -> tuple[float, float]:
+    """根据冲激响应包络推荐显示时间窗口（秒）。
+
+    思路：
+      1. 取 |h(t)| 作包络；
+      2. 找到 envelope > threshold_factor·peak 的首末点，作为冲激"活动区间"；
+      3. 左侧 pad 出区间宽度的 left_pad_frac，提供前导上下文；
+      4. 右侧 pad 出 right_pad_factor_by_wf[waveform] 倍区间宽度：
+         - impulse / pulse 较小（看冲激本体即可）；
+         - step / TDR 较大（要看趋于稳态的尾段）。
+
+    Parameters
+    ----------
+    h_t : ndarray
+        冲激响应序列（任意 waveform 都先经过 compute_time_domain 内部得到 h(t)）。
+    dt_s : float
+        时间步长（秒）。
+    waveform : str
+        "impulse" | "pulse" | "step" | "TDR"
+    threshold_factor : float
+        相对峰值的截断比例，默认 1%。
+    left_pad_frac : float
+        左侧 padding 比例。
+    right_pad_factor_by_wf : dict | None
+        各波形对应的右侧 padding 倍数。None 时使用内置默认。
+
+    Returns
+    -------
+    (t_lo_s, t_hi_s) : tuple[float, float]
+        建议 xlim，秒为单位。h_t 为空或全零时退化为 (0, len*dt)。
+    """
+    if right_pad_factor_by_wf is None:
+        right_pad_factor_by_wf = {
+            "impulse": 0.3,
+            "pulse":   0.5,
+            "step":    1.0,
+            "TDR":     1.0,
+        }
+
+    env = np.abs(np.asarray(h_t))
+    n = env.size
+    if n == 0:
+        return 0.0, 0.0
+    peak = float(env.max())
+    if peak <= 0.0:
+        return 0.0, n * dt_s
+
+    thresh = peak * threshold_factor
+    above = np.where(env > thresh)[0]
+    if above.size == 0:
+        return 0.0, n * dt_s
+    first_idx = int(above[0])
+    last_idx = int(above[-1])
+
+    width = max(1, last_idx - first_idx)
+    pad_left = int(left_pad_frac * width)
+    pad_right = int(right_pad_factor_by_wf.get(waveform, 0.5) * width)
+
+    lo = max(0, first_idx - pad_left)
+    hi = min(n - 1, last_idx + pad_right)
+    return lo * dt_s, hi * dt_s
+
+
 def _td_tdr_impedance(step_t: np.ndarray, z0: float) -> np.ndarray:
     gamma = np.clip(np.real(step_t), -0.9999, 0.9999)
     return z0 * (1.0 + gamma) / (1.0 - gamma)
@@ -229,4 +299,7 @@ def compute_time_domain(
         "label":         label,
         "y_label":       y_label,
         "compat_status": compat,
+        # 冲激响应（实部），用于 suggest_time_window 推荐显示范围
+        "impulse_h_t":   np.real(h_t),
+        "dt_s":          float(dt_s),
     }

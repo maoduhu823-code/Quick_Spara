@@ -18,6 +18,8 @@ importtime_*.txt
 
 # 运行时测试输出
 QS_runtime_services/_aggregator_test_output/
+dev_scripts/_out/
+dev_scripts/diag_out/
 
 # 本地运行数据
 Public/data_feedback/

@@ -44,6 +44,7 @@ app_utils   ─┘
 4. **`sparam_core.py` 是 shim**——新增算法直接放进 `QS_domain/algorithms/`，新增旧 import 的兼容入口可在 shim 末尾添加 re-export。
 5. **提交前必须跑 `python -m pytest tests/ -q`**；测试目录约 75 项，覆盖 domain / services / infra / compat 四层。
 6. **`QS_runtime_services/` 是独立子系统**（试用许可、版本管理、反馈聚合），未经用户授权不要改动。
+7. **不要主动跑全盘 UI 烟测**（`dev_scripts/ui_smoke/run_all.py` 及单独的 `cases_*.py`）；除非用户明确要求，否则只跑 `pytest tests/`。烟测耗时较长且会弹/关 matplotlib 窗口，应由用户决定何时触发。
 
 ## 四、任务路由 — 按需加载 Tier 1 文档
 

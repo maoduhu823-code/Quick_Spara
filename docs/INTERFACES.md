@@ -83,7 +83,14 @@ def compute_time_domain(network, p1, p2, waveform='TDR',
                         s_params=None) -> dict
 # waveform: 'TDR' | 'impulse' | 'step' | 'pulse'
 # window_type: 'gaussian' | 'rect' | 'hanning' | 'hamming' | 'blackman'
-# return: time_ps / y_data / label / y_label / compat_status
+# return: time_ps / y_data / label / y_label / compat_status / impulse_h_t / dt_s
+
+def suggest_time_window(h_t, dt_s, waveform='impulse',
+                        threshold_factor=0.01, left_pad_frac=0.1,
+                        right_pad_factor_by_wf=None) -> (float, float)
+# 用冲激响应包络（>threshold_factor·peak）估计活动区间，
+# 左侧 pad left_pad_frac×width，右侧按 waveform 类型 pad（impulse 0.3 / pulse 0.5 / step·TDR 1.0）
+# 返回 (t_lo_s, t_hi_s)；h_t 空或全零退化为 (0, n·dt)
 ```
 
 ### `QS_domain/algorithms/port_merge.py`
@@ -92,6 +99,37 @@ def merge_ports_multi(ntw, merge_groups: list[list[int]],
                       z0_list: list[float], y_orig=None) -> rf.Network
 # merge_groups 内部用 0-based 端口索引；输出端口序：保留端口 + 各合并组
 # 新端口命名: "Merge_port_<1-based索引用_分隔>"
+```
+
+### `QS_domain/algorithms/topology_detect.py`
+```python
+@dataclass
+class ChannelInfo:
+    ports: list[int]              # 1-based 端口号
+    tx: int | None                # hub / 驱动端（行和最大）
+    rxs: list[int]                # 按群延迟从近到远
+    delays_ns: list[float]        # 与 rxs 一一对应，TX→RX_k 的群延迟
+    il_db: list[float]            # 与 rxs 一一对应，mid-band 平均 |S| 的 dB
+    topology: str                 # "p2p" | "star" | "multi-drop" | "unknown"
+
+@dataclass
+class TopologyReport:
+    n_ports: int
+    band_ghz: tuple[float, float]
+    low_freq_ghz: float
+    y_threshold_siemens: float
+    s_threshold_db: float
+    channels: list[ChannelInfo]
+    isolated_ports: list[int]
+
+def detect_topology(network, low_freq_ghz=0.1, band_ghz=None,
+                    y_threshold_siemens=5e-4, s_threshold_db=-25.0,
+                    delay_tolerance_ns=0.1) -> TopologyReport
+# 流水线：低频 Y 阈值化连通图 → BFS 连通分量 → 分量>2 时 hub=|S| 行和最大者
+# → 群延迟排序 RX → 三角不等式判别 star / multi-drop
+# band_ghz=None 时自动取频率轴 [10%, 60%] 区间
+
+def format_report(report: TopologyReport, file_label: str = "") -> str
 ```
 
 ---

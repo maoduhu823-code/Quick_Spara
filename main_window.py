@@ -7,12 +7,12 @@ os.environ.setdefault("SKRF_PLOT_ENV", "none")
 
 import numpy as np
 import skrf as rf
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QTextCursor, QAction
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QListWidget, QLabel, QLineEdit, QMessageBox,
     QComboBox, QGroupBox, QCheckBox, QGridLayout, QListWidgetItem,
-    QTextEdit, QDialog, QInputDialog
+    QTextEdit, QDialog, QInputDialog, QToolButton, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -237,6 +237,11 @@ class SParameterViewer_MainWin(QWidget):
             self.td_analysis_btn.clicked.connect(self.call_time_domain_dialog)
             sparam_ops_layout.addWidget(self.td_analysis_btn)
 
+        self.topology_btn = QPushButton('拓扑识别')
+        self.topology_btn.setFixedHeight(32)
+        self.topology_btn.clicked.connect(self.call_topology_detect)
+        sparam_ops_layout.addWidget(self.topology_btn)
+
         sparam_ops_group.setLayout(sparam_ops_layout)
         left_panel.addWidget(sparam_ops_group)
 
@@ -301,17 +306,23 @@ class SParameterViewer_MainWin(QWidget):
         self.port_select_btn.setFixedWidth(80)
         plot_right_layout.addWidget(self.port_select_btn, 0, 0)
 
-        self.btn_freq_list = QPushButton('频点列表')
-        self.btn_freq_list.clicked.connect(self.print_freq_axis)
-        plot_right_layout.addWidget(self.btn_freq_list, 0, 1)
-
-        self.Basic_info = QPushButton('文件信息')
-        self.Basic_info.clicked.connect(self.Basic_info_print)
-        plot_right_layout.addWidget(self.Basic_info, 0, 2)
-
-        self.BandWidth_focus = QPushButton('频域切片')
-        self.BandWidth_focus.clicked.connect(self.call_freq_slice)
-        plot_right_layout.addWidget(self.BandWidth_focus, 0, 3)
+        # 「参数信息」下拉按钮：标题常驻按钮、动作藏在菜单里，避免标题与选项并列
+        self.param_info_btn = QToolButton()
+        self.param_info_btn.setText('参数信息 ▾')
+        self.param_info_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.param_info_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.param_info_menu = QMenu(self.param_info_btn)
+        self.act_freq_axis = QAction('频率轴', self)
+        self.act_freq_axis.triggered.connect(self.print_freq_axis)
+        self.act_basic_info = QAction('基本信息', self)
+        self.act_basic_info.triggered.connect(self.Basic_info_print)
+        self.act_freq_slice = QAction('频域切片', self)
+        self.act_freq_slice.triggered.connect(self.call_freq_slice)
+        self.param_info_menu.addAction(self.act_freq_axis)
+        self.param_info_menu.addAction(self.act_basic_info)
+        self.param_info_menu.addAction(self.act_freq_slice)
+        self.param_info_btn.setMenu(self.param_info_menu)
+        plot_right_layout.addWidget(self.param_info_btn, 0, 1, 1, 3)
 
         plot_right_layout.addWidget(QLabel("映射模式:"), 1, 0)
         self.mapping_combo = QComboBox()
@@ -1041,6 +1052,10 @@ class SParameterViewer_MainWin(QWidget):
         if not selected_items:
             QMessageBox.warning(self, '错误', '请先选择文件！')
             return
+
+        plt = _get_pyplot()
+        configure_matplotlib()
+
         for item in selected_items:
             try:
                 file_name = self.get_file_key_from_item(item)
@@ -1053,6 +1068,33 @@ class SParameterViewer_MainWin(QWidget):
                     spacing = (freqs[i] - freqs[i - 1]) / 1e6 if i > 0 else 0.0
                     print(f"{i + 1:>5}  {f / 1e9:>14.6f}  {spacing:>10.3f}")
                 print(f"共 {len(freqs)} 个频点，范围 {freqs[0] / 1e9:.4f} ~ {freqs[-1] / 1e9:.4f} GHz")
+
+                freq_g = freqs / 1e9
+                idx = np.arange(1, len(freqs) + 1)
+                spacings_mhz = np.diff(freqs) / 1e6 if len(freqs) > 1 else np.array([])
+
+                fig, axes = plt.subplots(2, 1, figsize=(8, 6), sharex=False)
+                fig.suptitle(f'{os.path.basename(file_name)} 频率轴'
+                             f'（{len(freqs)} 点，{freq_g[0]:.4f} ~ {freq_g[-1]:.4f} GHz）')
+
+                axes[0].plot(idx, freq_g, marker='o', markersize=3, linewidth=1)
+                axes[0].set_xlabel('频点序号')
+                axes[0].set_ylabel('频率 (GHz)')
+                axes[0].set_title('频率 vs 序号')
+                axes[0].grid(True)
+
+                if spacings_mhz.size > 0:
+                    axes[1].plot(idx[1:], spacings_mhz, marker='.', markersize=3, linewidth=1)
+                    axes[1].set_ylabel('间距 (MHz)')
+                else:
+                    axes[1].text(0.5, 0.5, '仅 1 个频点，无间距', ha='center', va='center',
+                                 transform=axes[1].transAxes)
+                axes[1].set_xlabel('频点序号')
+                axes[1].set_title('相邻间距')
+                axes[1].grid(True)
+
+                plt.tight_layout()
+                plt.show()
             except Exception as e:
                 show_error(self, f"打印频率轴出错: {str(e)}")
 
@@ -1460,3 +1502,24 @@ class SParameterViewer_MainWin(QWidget):
             get_selected_files=self.get_selected_file_keys,
         )
         dialog.show()
+
+    def call_topology_detect(self):
+        """对每个选中的文件运行拓扑识别并打印报告。"""
+        from QS_domain.algorithms.topology_detect import detect_topology, format_report
+        try:
+            selected = self.get_selected_file_keys()
+            if not selected:
+                QMessageBox.warning(self, '错误', '请先选择文件！')
+                return
+            for file_name in selected:
+                network = self.get_network(file_name)
+                if network is None:
+                    print(f"[拓扑识别] 未找到网络: {file_name}")
+                    continue
+                if network.nports < 2:
+                    print(f"[拓扑识别] {file_name} 端口数 < 2，跳过")
+                    continue
+                report = detect_topology(network)
+                print(format_report(report, file_label=os.path.basename(file_name)))
+        except Exception:
+            show_error(self, "拓扑识别出错")

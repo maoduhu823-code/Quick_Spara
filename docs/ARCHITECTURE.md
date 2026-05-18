@@ -13,7 +13,7 @@ Quick_Sparam/
 ├── Quick_Sparam_install.pyw     ( 9)    精简版双击启动器（注入 QS_LIMITED=1 后委派给 Quick_Sparam_B.main）
 ├── Quick_Sparam_install.spec    (45)    PyInstaller 配置（指向 Quick_Sparam_B.py + runtime hook）
 ├── pyinstaller_hooks/                   PyInstaller runtime hook：冻结后强制 QS_LIMITED=1
-├── main_window.py             (1216)    SParameterViewer_MainWin（仍在瘦身）
+├── main_window.py             (1525)    SParameterViewer_MainWin（仍在瘦身）
 ├── app_utils.py                (131)    Qt 工具层（错误弹窗、字体、绘图辅助）
 ├── sparam_core.py               (45)    向后兼容 shim — 只做 re-export
 │
@@ -25,8 +25,9 @@ Quick_Sparam/
 │       ├── impedance.py         (40)    端口阻抗检查与修正
 │       ├── ripple.py           (107)    纹波拟合（多项式 / IEEE 802.3-2022 / Savitzky-Golay）
 │       ├── se2diff.py          (175)    单端→差分/混合模式转换（3 个公共函数）
-│       ├── time_domain.py      (165)    时域变换（TDR / step / impulse / pulse）
-│       └── port_merge.py        (46)    端口并联合并
+│       ├── time_domain.py      (305)    时域变换（TDR / step / impulse / pulse）+ suggest_time_window
+│       ├── port_merge.py        (46)    端口并联合并
+│       └── topology_detect.py  (330)    多端口 TX↔RX 配对识别（低频 Y 连通 + mid-band IL hub + 群延迟）
 │
 ├── QS_services/                          应用服务层（禁止 PyQt6）
 │   ├── network_service.py       (73)    NetworkService + NetworkLoadError
@@ -38,7 +39,7 @@ Quick_Sparam/
 │
 ├── QS_dialogs/                           UI 对话框（Qt）
 │   ├── freq_analysis.py       (1606)    重型：频域批量分析 + Excel 导出
-│   ├── time_domain.py          (429)    时域分析对话框
+│   ├── time_domain.py          (537)    时域分析对话框
 │   ├── cascade.py              (253)    S 参数级联
 │   ├── port_reduction.py       (233)    端口阻抗端接/降阶
 │   ├── se2diff.py              (193)    单端→差分对话框
@@ -60,7 +61,7 @@ Quick_Sparam/
 │
 ├── samples/                              .snp 样本（s2p/s4p）
 ├── tests/                                pytest 套件
-│   ├── domain/  test_port_parser.py · test_ripple.py
+│   ├── domain/  test_port_parser.py · test_ripple.py · test_topology_detect.py · test_time_window.py
 │   ├── services/ test_network_service.py · test_plotting_service.py
 │   ├── infra/   test_cache.py
 │   └── compat/  test_sparam_core.py（保护向后兼容入口）

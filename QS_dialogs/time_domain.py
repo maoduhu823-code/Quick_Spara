@@ -14,6 +14,7 @@ from PyQt6.QtGui import QFont
 
 from sparam_core import (compute_time_domain, td_default_params,
                          td_compat_check, parse_port_input)
+from QS_domain.algorithms.time_domain import suggest_time_window
 from app_utils import show_error, check_and_set_port_names
 from QS_dialogs.loading import LoadingDialog
 
@@ -224,8 +225,15 @@ class TimeDomainDialog(QDialog):
         self._same_plot_cb = QCheckBox("曲线叠加")
         self._legend_cb    = QCheckBox("显示图例")
         self._legend_cb.setChecked(True)
+        self._auto_xlim_cb = QCheckBox("自动时间窗口")
+        self._auto_xlim_cb.setChecked(True)
+        self._auto_xlim_cb.setToolTip(
+            "根据冲激响应包络（>1% 峰值）推荐 xlim，避免末段大量空波形。"
+            "取消则显示完整 1/df 时间范围。"
+        )
         layout.addWidget(self._same_plot_cb)
         layout.addWidget(self._legend_cb)
+        layout.addWidget(self._auto_xlim_cb)
         layout.addWidget(QLabel("时间单位:"))
         self._unit_combo = QComboBox()
         self._unit_combo.addItems(["ps", "ns"])
@@ -437,6 +445,8 @@ class TimeDomainDialog(QDialog):
         QApplication.processEvents()
 
         last_ylabel = "Impedance (Ω)"
+        # 收集本轮各条曲线的建议 xlim（秒），用于绘制后合并应用
+        xlim_candidates: list[tuple[float, float]] = []
         try:
             for i in range(self._port_list.count()):
                 if loading.cancelled:
@@ -489,11 +499,27 @@ class TimeDomainDialog(QDialog):
                 self.all_results[key] = result
                 last_ylabel = result["y_label"]
 
+                # 收集 xlim 候选
+                h_t = result.get("impulse_h_t")
+                dt_s = result.get("dt_s")
+                if h_t is not None and dt_s:
+                    lo_s, hi_s = suggest_time_window(h_t, dt_s, waveform=info["waveform"])
+                    xlim_candidates.append((lo_s, hi_s))
+
             self.ax.set_xlabel(f"时间 ({unit})")
             self.ax.set_ylabel(last_ylabel)
             self.ax.grid(True)
             if self._legend_cb.isChecked():
                 self.ax.legend()
+
+            # 自动时间窗口：所有曲线建议范围的并集
+            if self._auto_xlim_cb.isChecked() and xlim_candidates:
+                lo_s = min(c[0] for c in xlim_candidates)
+                hi_s = max(c[1] for c in xlim_candidates)
+                if hi_s > lo_s:
+                    scale = 1e9 if unit == "ns" else 1e12
+                    self.ax.set_xlim(lo_s * scale, hi_s * scale)
+
             self.fig.canvas.mpl_connect("pick_event", self._on_curve_pick)
             self.fig.show()
 

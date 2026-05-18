@@ -124,13 +124,12 @@ def _exercise_info_buttons(ctx: SmokeContext, viewer) -> None:
     select_files(viewer, [0])
     viewer.port1_input.setText("1")
     viewer.port2_input.setText("2")
-    for button in [
-        viewer.port_select_btn,
-        viewer.btn_freq_list,
-        viewer.Basic_info,
-        viewer.BandWidth_focus,
-    ]:
-        button.click()
+    viewer.port_select_btn.click()
+    ctx.process_events()
+    ctx.close_mpl_figures()
+    # 「参数信息」下拉菜单的 3 个动作
+    for action in (viewer.act_freq_axis, viewer.act_basic_info, viewer.act_freq_slice):
+        action.trigger()
         ctx.process_events()
         ctx.close_mpl_figures()
     for text in ["清除缓存", "清除输出", "版本信息", "评价&反馈"]:
