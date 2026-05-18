@@ -13,8 +13,9 @@ import socket
 import sys
 
 from PyQt6.QtWidgets import (
-    QApplication, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
-    QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit,
+    QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog,
+    QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton,
     QRadioButton, QVBoxLayout, QWidget,
 )
 
@@ -93,6 +94,7 @@ class FeedbackDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(FEEDBACK_WINDOW_TITLE)
         self.setMinimumSize(1020, 520)
+        self.attachment_paths: list[Path] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 22)
@@ -154,11 +156,13 @@ class FeedbackDialog(QDialog):
         )
         self.request_text_edit = self._note_edit(REQUEST_TEXT_PLACEHOLDER)
         self.request_text_edit.setFixedHeight(92)
+        attachment_widget = self._attachment_widget()
 
         request_layout.addRow("重要度:", self.request_importance_combo)
         request_layout.addRow("紧急度:", self.request_urgency_combo)
         request_layout.addRow("维度:", self.request_dimension_combo)
         request_layout.addRow("需求描述:", self.request_text_edit)
+        request_layout.addRow("附件:", attachment_widget)
         request_group.setLayout(request_layout)
         columns.addWidget(request_group, 1)
 
@@ -179,7 +183,7 @@ class FeedbackDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def feedback(self) -> dict[str, str]:
+    def feedback(self) -> dict[str, object]:
         return {
             "usage_intensity": self._checked_text(self.usage_intensity_group),
             "point_efficiency": self._checked_text(self.point_efficiency_group),
@@ -190,6 +194,7 @@ class FeedbackDialog(QDialog):
             "request_urgency": self._combo_value(self.request_urgency_combo),
             "request_dimension": self._combo_value(self.request_dimension_combo),
             "request_text": self.request_text_edit.toPlainText().strip(),
+            "attachments": [str(path) for path in self.attachment_paths],
         }
 
     def _choice_group(
@@ -233,6 +238,88 @@ class FeedbackDialog(QDialog):
         combo.setFixedHeight(30)
         return combo
 
+    def _attachment_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.attachment_list = QListWidget()
+        self.attachment_list.setFixedHeight(86)
+        self.attachment_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        self.attachment_list.setToolTip("可添加截图、数据文件或复现材料")
+        layout.addWidget(self.attachment_list)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        add_button = QPushButton("添加附件")
+        remove_button = QPushButton("移除选中")
+        add_button.clicked.connect(self._add_attachments)
+        remove_button.clicked.connect(self._remove_selected_attachments)
+        button_row.addWidget(add_button)
+        button_row.addWidget(remove_button)
+        button_row.addStretch()
+        layout.addLayout(button_row)
+        return widget
+
+    def _add_attachments(self) -> None:
+        file_names, _selected_filter = QFileDialog.getOpenFileNames(
+            self,
+            "选择附件",
+            "",
+            "所有文件 (*.*)",
+        )
+        if not file_names:
+            return
+
+        seen = {self._path_key(path) for path in self.attachment_paths}
+        for file_name in file_names:
+            path = Path(file_name)
+            key = self._path_key(path)
+            if key in seen or not path.is_file():
+                continue
+            self.attachment_paths.append(path)
+            seen.add(key)
+        self._refresh_attachment_list()
+
+    def _remove_selected_attachments(self) -> None:
+        selected_rows = sorted(
+            {self.attachment_list.row(item) for item in self.attachment_list.selectedItems()},
+            reverse=True,
+        )
+        for row in selected_rows:
+            if 0 <= row < len(self.attachment_paths):
+                del self.attachment_paths[row]
+        self._refresh_attachment_list()
+
+    def _refresh_attachment_list(self) -> None:
+        self.attachment_list.clear()
+        for path in self.attachment_paths:
+            item = QListWidgetItem(f"{path.name} ({self._format_file_size(path)})")
+            item.setToolTip(str(path))
+            self.attachment_list.addItem(item)
+
+    def _path_key(self, path: Path) -> str:
+        try:
+            return str(path.resolve()).casefold()
+        except OSError:
+            return str(path).casefold()
+
+    def _format_file_size(self, path: Path) -> str:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return "大小未知"
+        units = ["B", "KB", "MB", "GB"]
+        value = float(size)
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                return f"{value:.1f}{unit}" if unit != "B" else f"{int(value)}B"
+            value /= 1024
+        return f"{size}B"
+
     def _checked_text(self, group: QButtonGroup) -> str:
         button = group.checkedButton()
         return button.text() if button else ""
@@ -248,6 +335,9 @@ class FeedbackDialog(QDialog):
             "overall_efficiency", "overall_efficiency_note", "request_text",
         )
         if not any(feedback.get(key) for key in text_fields):
+            if feedback.get("attachments"):
+                self.accept()
+                return
             QMessageBox.warning(self, "信息不完整", "请至少填写一项评价或反馈内容。")
             return
         self.accept()
@@ -267,8 +357,9 @@ def show_feedback_dialog(parent: QWidget | None = None) -> None:
     )
 
 
-def append_feedback(feedback: dict[str, str]) -> None:
+def append_feedback(feedback: dict[str, object]) -> None:
     profile = get_usage_profile()
+    attachments = _feedback_attachments(feedback)
     row = [
         _format_dt(_now()),
         profile.get("user_name", ""),
@@ -286,6 +377,7 @@ def append_feedback(feedback: dict[str, str]) -> None:
         feedback.get("request_urgency", ""),
         feedback.get("request_dimension", ""),
         feedback.get("request_text", ""),
+        _attachment_names(attachments),
         APP_VERSION,
     ]
     submit_record_async(
@@ -299,7 +391,23 @@ def append_feedback(feedback: dict[str, str]) -> None:
         developer_inbox_dirs=configured_paths(
             DEVELOPER_RECORD_INBOX_DIRS_BY_PLATFORM, _app_base_dir()
         ),
+        attachments=attachments,
     )
+
+
+def _feedback_attachments(feedback: dict[str, object]) -> list[Path]:
+    raw_attachments = feedback.get("attachments", [])
+    if not isinstance(raw_attachments, list):
+        return []
+    paths: list[Path] = []
+    for raw_path in raw_attachments:
+        if raw_path:
+            paths.append(Path(str(raw_path)))
+    return paths
+
+
+def _attachment_names(paths: list[Path]) -> str:
+    return "; ".join(path.name for path in paths)
 
 
 def _app_base_dir() -> Path:
@@ -330,7 +438,7 @@ def _run_feedback_preview() -> int:
     return 0
 
 
-def feedback_to_pretty_text(feedback: dict[str, str]) -> str:
+def feedback_to_pretty_text(feedback: dict[str, object]) -> str:
     lines = [f"{key}: {value}" for key, value in feedback.items()]
     return "\n".join(lines)
 

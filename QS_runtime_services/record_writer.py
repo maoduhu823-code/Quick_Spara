@@ -15,7 +15,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
+import shutil
 import sys
 from threading import Thread
 from typing import Any
@@ -43,6 +45,7 @@ def submit_record_async(
     row: list[Any],
     local_inbox_dirs: list[Path],
     developer_inbox_dirs: list[Path],
+    attachments: list[str | os.PathLike] | None = None,
 ) -> None:
     """后台投递一条记录 JSON 到本地 inbox 和开发者 inbox。"""
     worker = Thread(
@@ -54,6 +57,7 @@ def submit_record_async(
             row,
             local_inbox_dirs,
             developer_inbox_dirs,
+            list(attachments or []),
         ),
         daemon=True,
         name=f"{record_name}_record_writer",
@@ -84,20 +88,35 @@ def _submit_record_worker(
     row: list[Any],
     local_inbox_dirs: list[Path],
     developer_inbox_dirs: list[Path],
+    attachments: list[str | os.PathLike],
 ) -> None:
     payload = _build_payload(record_name, sheet_name, headers, row)
+    attachment_entries = _build_attachment_entries(
+        str(payload.get("record_id", "")), attachments
+    )
+    _apply_attachment_entries(payload, attachment_entries)
     prefix = _record_prefix(sheet_name)
 
     local_written_dir = None
     if local_inbox_dirs:
         local_written_dir = _write_first_available_inbox(
-            record_name, "本地", payload, _unique_paths(local_inbox_dirs), prefix
+            record_name,
+            "本地",
+            payload,
+            _unique_paths(local_inbox_dirs),
+            prefix,
+            attachment_entries,
         )
     if developer_inbox_dirs:
         developer_candidates = _unique_paths(developer_inbox_dirs, skip={local_written_dir})
         if developer_candidates:
             _write_first_available_inbox(
-                record_name, "开发者", payload, developer_candidates, prefix
+                record_name,
+                "开发者",
+                payload,
+                developer_candidates,
+                prefix,
+                attachment_entries,
             )
     if not local_inbox_dirs and not developer_inbox_dirs:
         print_access_unavailable_once()
@@ -138,13 +157,16 @@ def _write_first_available_inbox(
     payload: dict[str, Any],
     inbox_dirs: list[Path],
     prefix: str,
+    attachment_entries: list[dict[str, Any]],
 ) -> Path | None:
     if not inbox_dirs:
         print_access_unavailable_once()
         return None
 
     for inbox_dir in inbox_dirs:
-        ok, _error = _write_payload_with_timeout(inbox_dir, payload, prefix)
+        ok, _error = _write_payload_with_timeout(
+            inbox_dir, payload, prefix, attachment_entries
+        )
         if ok:
             return inbox_dir
 
@@ -153,13 +175,16 @@ def _write_first_available_inbox(
 
 
 def _write_payload_with_timeout(
-    inbox_dir: Path, payload: dict[str, Any], prefix: str
+    inbox_dir: Path,
+    payload: dict[str, Any],
+    prefix: str,
+    attachment_entries: list[dict[str, Any]],
 ) -> tuple[bool, str]:
     result: dict[str, Any] = {}
 
     def write_once() -> None:
         try:
-            _write_payload_file(inbox_dir, payload, prefix)
+            _write_payload_file(inbox_dir, payload, prefix, attachment_entries)
             result["ok"] = True
         except Exception as exc:
             result["error"] = str(exc)
@@ -174,8 +199,14 @@ def _write_payload_with_timeout(
     return False, result.get("error", "未知写入错误")
 
 
-def _write_payload_file(inbox_dir: Path, payload: dict[str, Any], prefix: str) -> Path:
+def _write_payload_file(
+    inbox_dir: Path,
+    payload: dict[str, Any],
+    prefix: str,
+    attachment_entries: list[dict[str, Any]] | None = None,
+) -> Path:
     inbox_dir.mkdir(parents=True, exist_ok=True)
+    _copy_attachments(inbox_dir, attachment_entries or [])
 
     filename = _record_filename(prefix, payload)
     final_path = inbox_dir / filename
@@ -184,6 +215,79 @@ def _write_payload_file(inbox_dir: Path, payload: dict[str, Any], prefix: str) -
         json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
     temp_path.replace(final_path)
     return final_path
+
+
+def _build_attachment_entries(
+    record_id: str, attachments: list[str | os.PathLike]
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    used_names: set[str] = set()
+    attachment_dir = _safe_filename_part(record_id) or uuid.uuid4().hex
+    for raw_path in attachments:
+        source_path = Path(raw_path)
+        stored_name = _unique_attachment_name(source_path.name, used_names)
+        relative_path = PurePosixPath("attachments", attachment_dir, stored_name).as_posix()
+        entry: dict[str, Any] = {
+            "source_path": str(source_path),
+            "original_name": source_path.name,
+            "stored_name": stored_name,
+            "relative_path": relative_path,
+        }
+        try:
+            entry["size_bytes"] = source_path.stat().st_size
+        except OSError:
+            entry["size_bytes"] = ""
+        entries.append(entry)
+    return entries
+
+
+def _apply_attachment_entries(
+    payload: dict[str, Any], attachment_entries: list[dict[str, Any]]
+) -> None:
+    if not attachment_entries:
+        return
+    public_entries = [
+        {key: value for key, value in entry.items() if key != "source_path"}
+        for entry in attachment_entries
+    ]
+    attachment_text = "; ".join(entry["relative_path"] for entry in public_entries)
+    payload["attachments"] = public_entries
+    record = payload.get("record")
+    if isinstance(record, dict):
+        record["附件"] = attachment_text
+
+
+def _copy_attachments(inbox_dir: Path, attachment_entries: list[dict[str, Any]]) -> None:
+    if not attachment_entries:
+        return
+    for entry in attachment_entries:
+        source_path = Path(str(entry["source_path"]))
+        if not source_path.is_file():
+            raise FileNotFoundError(f"附件不存在或不是文件: {source_path}")
+        relative_path = PurePosixPath(str(entry["relative_path"]))
+        destination = inbox_dir.parent.joinpath(*relative_path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            shutil.copy2(source_path, temp_path)
+            temp_path.replace(destination)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+
+def _unique_attachment_name(original_name: str, used_names: set[str]) -> str:
+    safe_name = _safe_filename_part(original_name) or "attachment"
+    path = Path(safe_name)
+    stem = path.stem or "attachment"
+    suffix = path.suffix
+    candidate = safe_name
+    index = 2
+    while candidate.casefold() in used_names:
+        candidate = f"{stem}_{index}{suffix}"
+        index += 1
+    used_names.add(candidate.casefold())
+    return candidate
 
 
 def _record_filename(prefix: str, payload: dict[str, Any]) -> str:
