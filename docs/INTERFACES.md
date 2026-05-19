@@ -79,10 +79,11 @@ def td_compat_check(network, tr_ps, dt_ps, n_points) -> dict
 def compute_time_domain(network, p1, p2, waveform='TDR',
                         tr_ps=None, dt_ps=None, n_points=None,
                         z0=50.0, pulse_width_ps=None,
-                        window_type='gaussian',
+                        window_type='gaussian', method='legacy',
                         s_params=None) -> dict
 # waveform: 'TDR' | 'impulse' | 'step' | 'pulse'
 # window_type: 'gaussian' | 'rect' | 'hanning' | 'hamming' | 'blackman'
+# method: 'legacy' | 'channel_analyse'
 # return: time_ps / y_data / label / y_label / compat_status / impulse_h_t / dt_s
 
 def suggest_time_window(h_t, dt_s, waveform='impulse',

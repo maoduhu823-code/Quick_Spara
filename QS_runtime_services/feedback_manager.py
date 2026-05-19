@@ -8,10 +8,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from pathlib import Path
 import socket
 import sys
+import uuid
 
+from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog,
     QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -30,6 +34,7 @@ try:
         FEEDBACK_HEADERS,
         FEEDBACK_INTRO,
         FEEDBACK_WINDOW_TITLE,
+        OVERALL_SCORE_TITLE,
         OVERALL_EFFICIENCY_HELP,
         OVERALL_EFFICIENCY_NOTE_PLACEHOLDER,
         OVERALL_EFFICIENCY_TITLE,
@@ -64,6 +69,7 @@ except ImportError:
         FEEDBACK_HEADERS,
         FEEDBACK_INTRO,
         FEEDBACK_WINDOW_TITLE,
+        OVERALL_SCORE_TITLE,
         OVERALL_EFFICIENCY_HELP,
         OVERALL_EFFICIENCY_NOTE_PLACEHOLDER,
         OVERALL_EFFICIENCY_TITLE,
@@ -89,6 +95,80 @@ except ImportError:
 # 评价&反馈记录路径统一在 QS_runtime_services/path_config.py 中配置。
 
 
+class StarRatingWidget(QWidget):
+    ratingChanged = pyqtSignal(float)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._rating = 0.0
+        self.setFixedSize(150, 34)
+        self.setMouseTracking(True)
+        self.setToolTip("点击星星评分，左/右半星分别按 0.5 分递增")
+
+    def rating(self) -> float:
+        return self._rating
+
+    def set_rating(self, value: float) -> None:
+        bounded = max(0.0, min(5.0, round(float(value) * 2.0) / 2.0))
+        if bounded != self._rating:
+            self._rating = bounded
+            self.update()
+            self.ratingChanged.emit(self._rating)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = QFont()
+        font.setPointSize(22)
+        painter.setFont(font)
+
+        star_w = self._star_width()
+        for index in range(5):
+            x = index * star_w
+            rect = QRectF(x, 0, star_w, self.height())
+            painter.setPen(QColor("#c7c7c7"))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "★")
+
+            fill = max(0.0, min(1.0, self._rating - index))
+            if fill <= 0.0:
+                continue
+            painter.save()
+            painter.setClipRect(QRectF(x, 0, star_w * fill, self.height()))
+            painter.setPen(QColor("#f5b301"))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "★")
+            painter.restore()
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.set_rating(self._position_rating(event.position().x()))
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _position_rating(self, x: float) -> float:
+        if x <= 0:
+            return 0.0
+        raw = x / self._star_width()
+        return max(0.0, min(5.0, math.ceil(raw * 2.0) / 2.0))
+
+    def _star_width(self) -> float:
+        return self.width() / 5.0
+
+
+class AttachmentListWidget(QListWidget):
+    def __init__(self, paste_callback, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._paste_callback = paste_callback
+
+    def keyPressEvent(self, event) -> None:
+        if event.matches(QKeySequence.StandardKey.Paste):
+            self._paste_callback()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class FeedbackDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -111,6 +191,22 @@ class FeedbackDialog(QDialog):
         # 左列：评价
         eval_col = QVBoxLayout()
         eval_col.setSpacing(12)
+
+        score_group = QGroupBox(OVERALL_SCORE_TITLE)
+        score_layout = QHBoxLayout()
+        score_layout.setContentsMargins(12, 12, 12, 10)
+        score_layout.setSpacing(10)
+        self.overall_score_widget = StarRatingWidget()
+        self.overall_score_label = QLabel("0.0 / 5")
+        self.overall_score_label.setMinimumWidth(56)
+        self.overall_score_widget.ratingChanged.connect(
+            lambda value: self.overall_score_label.setText(f"{value:.1f} / 5")
+        )
+        score_layout.addWidget(self.overall_score_widget)
+        score_layout.addWidget(self.overall_score_label)
+        score_layout.addStretch()
+        score_group.setLayout(score_layout)
+        eval_col.addWidget(score_group)
 
         usage_group, self.usage_intensity_group = self._choice_group(
             USAGE_INTENSITY_TITLE, "", USAGE_INTENSITY_OPTIONS
@@ -155,7 +251,7 @@ class FeedbackDialog(QDialog):
             REQUEST_DIMENSION_OPTIONS, DEFAULT_REQUEST_DIMENSION
         )
         self.request_text_edit = self._note_edit(REQUEST_TEXT_PLACEHOLDER)
-        self.request_text_edit.setFixedHeight(92)
+        self.request_text_edit.setFixedHeight(68)
         attachment_widget = self._attachment_widget()
 
         request_layout.addRow("重要度:", self.request_importance_combo)
@@ -186,6 +282,7 @@ class FeedbackDialog(QDialog):
     def feedback(self) -> dict[str, object]:
         return {
             "usage_intensity": self._checked_text(self.usage_intensity_group),
+            "overall_score": f"{self.overall_score_widget.rating():.1f}",
             "point_efficiency": self._checked_text(self.point_efficiency_group),
             "point_efficiency_note": self.point_efficiency_note.toPlainText().strip(),
             "overall_efficiency": self._checked_text(self.overall_efficiency_group),
@@ -227,7 +324,7 @@ class FeedbackDialog(QDialog):
     def _note_edit(self, placeholder: str) -> QPlainTextEdit:
         edit = QPlainTextEdit()
         edit.setPlaceholderText(placeholder)
-        edit.setFixedHeight(72)
+        edit.setFixedHeight(54)
         return edit
 
     def _combo_with_empty(self, options: list[str], default: str = "") -> QComboBox:
@@ -244,21 +341,24 @@ class FeedbackDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        self.attachment_list = QListWidget()
+        self.attachment_list = AttachmentListWidget(self._paste_clipboard_image)
         self.attachment_list.setFixedHeight(86)
         self.attachment_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
-        self.attachment_list.setToolTip("可添加截图、数据文件或复现材料")
+        self.attachment_list.setToolTip("可添加截图、数据文件或复现材料；支持 Ctrl+V 粘贴图片")
         layout.addWidget(self.attachment_list)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
         add_button = QPushButton("添加附件")
+        paste_button = QPushButton("粘贴图片")
         remove_button = QPushButton("移除选中")
         add_button.clicked.connect(self._add_attachments)
+        paste_button.clicked.connect(self._paste_clipboard_image)
         remove_button.clicked.connect(self._remove_selected_attachments)
         button_row.addWidget(add_button)
+        button_row.addWidget(paste_button)
         button_row.addWidget(remove_button)
         button_row.addStretch()
         layout.addLayout(button_row)
@@ -283,6 +383,25 @@ class FeedbackDialog(QDialog):
             self.attachment_paths.append(path)
             seen.add(key)
         self._refresh_attachment_list()
+
+    def _paste_clipboard_image(self) -> None:
+        clipboard = QApplication.clipboard()
+        image = clipboard.image()
+        if image.isNull():
+            QMessageBox.information(self, "没有图片", "剪贴板中没有可粘贴的图片。")
+            return
+
+        target_dir = _app_base_dir() / "data_feedback" / "pasted_attachments"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_name = f"clipboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.png"
+        target_path = target_dir / file_name
+        if not image.save(str(target_path), "PNG"):
+            QMessageBox.warning(self, "粘贴失败", "剪贴板图片保存失败。")
+            return
+
+        self.attachment_paths.append(target_path)
+        self._refresh_attachment_list()
+        self.attachment_list.setCurrentRow(len(self.attachment_paths) - 1)
 
     def _remove_selected_attachments(self) -> None:
         selected_rows = sorted(
@@ -331,10 +450,14 @@ class FeedbackDialog(QDialog):
     def _accept_if_valid(self) -> None:
         feedback = self.feedback()
         text_fields = (
-            "usage_intensity", "point_efficiency", "point_efficiency_note",
+            "overall_score", "usage_intensity", "point_efficiency", "point_efficiency_note",
             "overall_efficiency", "overall_efficiency_note", "request_text",
         )
-        if not any(feedback.get(key) for key in text_fields):
+        has_text = any(
+            feedback.get(key) and feedback.get(key) != "0.0"
+            for key in text_fields
+        )
+        if not has_text:
             if feedback.get("attachments"):
                 self.accept()
                 return
@@ -368,6 +491,7 @@ def append_feedback(feedback: dict[str, object]) -> None:
         profile.get("lm_group", ""),
         profile.get("pl_group", ""),
         profile.get("project_name", ""),
+        feedback.get("overall_score", ""),
         feedback.get("usage_intensity", ""),
         feedback.get("point_efficiency", ""),
         feedback.get("point_efficiency_note", ""),

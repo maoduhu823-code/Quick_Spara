@@ -60,6 +60,7 @@ USAGE_INTENSITY_TITLE = "使用强度"
 POINT_EFFICIENCY_TITLE = "单点效率提高程度"
 OVERALL_EFFICIENCY_TITLE = "整体效率提高程度"
 REQUEST_GROUP_TITLE = "需求反馈"
+OVERALL_SCORE_TITLE = "整体评分"
 POINT_EFFICIENCY_HELP = "针对某个单点工作&流程，例如：串扰和计算、级联S参数、做竞品频域性能分析"
 OVERALL_EFFICIENCY_HELP = "针对满足项目过点所需的某个大类工作流程：TR* 后仿S参数优化效果统计输出"
 POINT_EFFICIENCY_NOTE_PLACEHOLDER = "可补充具体工作流、对比方式或估算依据，非必填"
@@ -84,7 +85,7 @@ DEFAULT_REQUEST_DIMENSION = "Bug反馈"
 
 FEEDBACK_HEADERS = [
     "提交时间", "用户姓名", "主机名", "部门", "LM大组", "PL小组", "应用项目名",
-    "使用强度", "单点效率提高程度", "单点效率补充", "整体效率提高程度",
+    "整体评分", "使用强度", "单点效率提高程度", "单点效率补充", "整体效率提高程度",
     "整体效率补充", "需求重要度", "需求紧急度", "需求维度", "需求描述",
     "附件", "App版本",
 ]
