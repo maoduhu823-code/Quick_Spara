@@ -118,8 +118,85 @@ def _td_impulse_response(freq_full: np.ndarray, s_full: np.ndarray,
     return time_s, h_t
 
 
+def _interp_linear_extrapolate(x_src: np.ndarray, y_src: np.ndarray,
+                               x_new: np.ndarray) -> np.ndarray:
+    """一维线性插值，边界外沿首末两段斜率外推。"""
+    x_src = np.asarray(x_src, dtype=float)
+    y_src = np.asarray(y_src, dtype=float)
+    x_new = np.asarray(x_new, dtype=float)
+    if x_src.size == 0:
+        return np.zeros_like(x_new)
+    if x_src.size == 1:
+        return np.full_like(x_new, float(y_src[0]), dtype=float)
+
+    y_new = np.interp(x_new, x_src, y_src)
+
+    left = x_new < x_src[0]
+    if np.any(left):
+        slope = (y_src[1] - y_src[0]) / (x_src[1] - x_src[0])
+        y_new[left] = y_src[0] + slope * (x_new[left] - x_src[0])
+
+    right = x_new > x_src[-1]
+    if np.any(right):
+        slope = (y_src[-1] - y_src[-2]) / (x_src[-1] - x_src[-2])
+        y_new[right] = y_src[-1] + slope * (x_new[right] - x_src[-1])
+
+    return y_new
+
+
+def _td_impulse_response_channel_analyse(
+        freq_orig: np.ndarray,
+        s_orig: np.ndarray,
+        n_fft: int,
+        dt_ps: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """参考 channel_analyse_test.py 的时域计算路径。
+
+    先由目标时间步长和 FFT 点数生成 rFFT 频轴，再把原始 S 参数的
+    幅度(dB)与展开相位插值/外推到该频轴，最后直接 irFFT。
+    """
+    dt_s = dt_ps * 1e-12
+    freq_target = np.fft.rfftfreq(n_fft, d=dt_s)
+
+    mag_db = 20.0 * np.log10(np.abs(s_orig) + 1e-20)
+    phase = np.unwrap(np.angle(s_orig))
+
+    mag_i = _interp_linear_extrapolate(freq_orig, mag_db, freq_target)
+    phase_i = _interp_linear_extrapolate(freq_orig, phase, freq_target)
+    s_resampled = 10.0 ** (mag_i / 20.0) * np.exp(1j * phase_i)
+
+    h_t = np.fft.irfft(s_resampled, n=n_fft)
+    time_s = np.arange(n_fft) * dt_s
+    return time_s, h_t
+
+
 def _td_step_response(h_t: np.ndarray) -> np.ndarray:
     return np.cumsum(h_t)
+
+
+def _trapezoidal_pulse(n: int, dt_s: float, rise_ps: float,
+                       pulse_width_ps: float) -> np.ndarray:
+    rise_n = max(1, int(rise_ps * 1e-12 / dt_s))
+    fall_n = rise_n
+    width_n = max(1, int(pulse_width_ps * 1e-12 / dt_s))
+    roof_n = max(1, width_n - (rise_n + fall_n) // 2)
+
+    shape = np.zeros(rise_n + roof_n + fall_n)
+    shape[:rise_n] = np.linspace(0.0, 1.0, rise_n, endpoint=False)
+    shape[rise_n:rise_n + roof_n] = 1.0
+    shape[-fall_n:] = np.linspace(1.0, 0.0, fall_n)
+
+    pulse = np.zeros(n)
+    n_copy = min(n, shape.size)
+    pulse[:n_copy] = shape[:n_copy]
+    return pulse
+
+
+def _fft_convolve_prefix(x: np.ndarray, h: np.ndarray, n_out: int) -> np.ndarray:
+    n_conv = max(1, x.size + h.size - 1)
+    n_fft = int(2 ** np.ceil(np.log2(n_conv)))
+    y = np.fft.irfft(np.fft.rfft(x, n_fft) * np.fft.rfft(h, n_fft), n_fft)
+    return y[:n_out]
 
 
 def suggest_time_window(
@@ -208,6 +285,7 @@ def compute_time_domain(
         z0: float = 50.0,
         pulse_width_ps: float = None,
         window_type: str = "gaussian",
+        method: str = "legacy",
         s_params: np.ndarray = None,
 ) -> dict:
     """
@@ -216,6 +294,9 @@ def compute_time_domain(
     waveform    : "TDR" | "impulse" | "step" | "pulse"
     window_type : "gaussian" | "rect" | "hanning" | "hamming" | "blackman"
                   | "tukey" | "kaiser"
+    method      : "legacy" | "channel_analyse"
+                  "channel_analyse" 参考 script_test/channel_analyse_test.py：
+                  由 dt/n_points 生成目标频轴，再插值/外推 S 参数后 irFFT。
 
     返回 {"time_ps", "y_data", "label", "y_label", "compat_status"}
     """
@@ -267,7 +348,12 @@ def compute_time_domain(
         s_full = s_orig.copy()
         freq_full = freq_orig.copy()
 
-    time_s, h_t = _td_impulse_response(freq_full, s_full, n_points, tr_ps, window_type)
+    if method == "channel_analyse":
+        time_s, h_t = _td_impulse_response_channel_analyse(
+            freq_orig, s_orig, n_points, dt_ps)
+    else:
+        time_s, h_t = _td_impulse_response(
+            freq_full, s_full, n_points, tr_ps, window_type)
     dt_s = time_s[1] - time_s[0] if len(time_s) > 1 else 1.0
     step_t = _td_step_response(h_t)
 
@@ -282,10 +368,14 @@ def compute_time_domain(
         y_label = "h(t)"
     elif waveform == "pulse":
         pw_ps = pulse_width_ps if pulse_width_ps else dt_ps * 10
-        n_shift = max(1, round(pw_ps * 1e-12 / dt_s))
-        shifted = np.zeros_like(step_t)
-        shifted[n_shift:] = step_t[:-n_shift]
-        y_data = step_t - shifted
+        if method == "channel_analyse":
+            pulse = _trapezoidal_pulse(len(h_t), dt_s, tr_ps, pw_ps)
+            y_data = _fft_convolve_prefix(pulse, h_t, len(h_t))
+        else:
+            n_shift = max(1, round(pw_ps * 1e-12 / dt_s))
+            shifted = np.zeros_like(step_t)
+            shifted[n_shift:] = step_t[:-n_shift]
+            y_data = step_t - shifted
         y_label = "Pulse Response"
     else:
         y_data = step_t
@@ -299,6 +389,7 @@ def compute_time_domain(
         "label":         label,
         "y_label":       y_label,
         "compat_status": compat,
+        "method":        method,
         # 冲激响应（实部），用于 suggest_time_window 推荐显示范围
         "impulse_h_t":   np.real(h_t),
         "dt_s":          float(dt_s),

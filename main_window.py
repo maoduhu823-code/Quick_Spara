@@ -289,6 +289,7 @@ class SParameterViewer_MainWin(QWidget):
         plot_left_layout.addWidget(QLabel("端口1:"), 0, 0)
         self.port1_input = QLineEdit()
         self.port1_input.setPlaceholderText("例: 1 2 3 或 1:5")
+        self.port1_input.textChanged.connect(self._sync_port2_if_tdr)
         plot_left_layout.addWidget(self.port1_input, 0, 1, 1, 2)
 
         plot_left_layout.addWidget(QLabel("端口2:"), 1, 0)
@@ -399,12 +400,24 @@ class SParameterViewer_MainWin(QWidget):
         plot_right_layout.addWidget(self._td_win_lbl,   7, 2)
         plot_right_layout.addWidget(self._td_win_combo, 7, 3)
 
+        self._td_method_lbl = QLabel("计算方法:")
+        self._td_method_combo = QComboBox()
+        self._td_method_combo.addItems(["现有算法", "参考脚本插值"])
+        self._td_method_combo.setToolTip(
+            "现有算法：沿用当前 DC 外推 + 频域窗 + irFFT。\n"
+            "参考脚本插值：按 t_step 和点数生成 rFFT 频轴，"
+            "将 S 参数幅度/相位插值到该频轴后直接 irFFT。"
+        )
+        plot_right_layout.addWidget(self._td_method_lbl,   8, 0)
+        plot_right_layout.addWidget(self._td_method_combo, 8, 1, 1, 3)
+
         self._xy_widgets = [self._xlbl, self.xscale_combo, self._ylbl, self.yscale_combo]
         self._td_widgets = [self._td_tr_lbl, self._td_tr_edit,
                             self._td_dt_lbl, self._td_dt_edit,
                             self._td_z0_lbl, self._td_z0_edit,
                             self._td_pw_lbl, self._td_pw_edit,
-                            self._td_win_lbl, self._td_win_combo]
+                            self._td_win_lbl, self._td_win_combo,
+                            self._td_method_lbl, self._td_method_combo]
 
         self.legend_checkbox = QCheckBox("显示图例")
         self.legend_checkbox.setChecked(True)
@@ -738,6 +751,14 @@ class SParameterViewer_MainWin(QWidget):
         if self.param_type_combo.currentText() == '时域':
             self._refresh_td_defaults()
 
+    def _is_tdr_plot_selected(self) -> bool:
+        return (self.param_type_combo.currentText() == '时域'
+                and self.facet_combo.currentText() == 'TDR阻抗')
+
+    def _sync_port2_if_tdr(self, text: str | None = None):
+        if self._is_tdr_plot_selected():
+            self.port2_input.setText(self.port1_input.text() if text is None else text)
+
     def _compute_pulse_width_default(self, dt_ps: float) -> float:
         """UI宽度默认：'关注频点'有输入取首项 f₀ 的奈奎斯特周期 1/(2f₀) ps；否则 30 × dt。"""
         txt = self.freG_input.text().strip() if hasattr(self, 'freG_input') else ''
@@ -762,7 +783,11 @@ class SParameterViewer_MainWin(QWidget):
             self._td_z0_edit.setVisible(is_tdr)
             self._td_pw_lbl.setVisible(is_pulse)
             self._td_pw_edit.setVisible(is_pulse)
+            self.port2_input.setEnabled(not is_tdr)
+            if is_tdr:
+                self._sync_port2_if_tdr()
             return
+        self.port2_input.setEnabled(True)
         xscale, yscale = _DEFAULT_SCALES.get((param_type, facet), ('线性', '线性'))
         self.xscale_combo.setCurrentText(xscale)
         self.yscale_combo.setCurrentText(yscale)
@@ -812,11 +837,13 @@ class SParameterViewer_MainWin(QWidget):
                 "Tukey": "tukey",   "Kaiser": "kaiser",
             }
             _win = _WIN_MAP.get(self._td_win_combo.currentText(), "gaussian")
+            _method = "channel_analyse" if self._td_method_combo.currentText() == "参考脚本插值" else "legacy"
             result = compute_time_domain(
                 network, p1, p2, td_mode_map.get(facet, 'TDR'),
                 tr_ps=_tr, dt_ps=_dt, z0=_z0,
                 pulse_width_ps=_pw,
                 window_type=_win,
+                method=_method,
                 s_params=self.get_param_matrix(file_name, 'S参数')
             )
             x_td = result["time_ps"]
@@ -904,7 +931,12 @@ class SParameterViewer_MainWin(QWidget):
 
         selected_files = self.get_selected_file_keys()
         port1 = self.port1_input.text().strip()
-        port2 = self.port2_input.text().strip()
+        is_tdr = self._is_tdr_plot_selected()
+        if is_tdr:
+            self._sync_port2_if_tdr(port1)
+            port2 = port1
+        else:
+            port2 = self.port2_input.text().strip()
         mapping_mode = self.mapping_combo.currentText()
 
         if not selected_files or not port1 or not port2:
@@ -917,7 +949,8 @@ class SParameterViewer_MainWin(QWidget):
             return
 
         new_plot_data = {'files': selected_files, 'port1': port1_list,
-                         'port2': port2_list, 'mode': mapping_mode}
+                         'port2': port2_list, 'mode': mapping_mode,
+                         'force_same_port': is_tdr}
         if not self.same_plot_checkbox.isChecked():
             self.plot_history = [new_plot_data]
         else:
@@ -954,6 +987,7 @@ class SParameterViewer_MainWin(QWidget):
                         network = self.get_network(file_name)
                         port1_plot = plot_data['port1']
                         port2_plot = plot_data['port2']
+                        force_same_port = plot_data.get('force_same_port', False)
                         print(f"{file_name}")
 
                         def _get_params(fname):
@@ -964,7 +998,12 @@ class SParameterViewer_MainWin(QWidget):
                             else:
                                 return self.get_s(fname)
 
-                        if mapping_mode == "一 一对应":
+                        if force_same_port:
+                            for p1 in port1_plot:
+                                line = self._plot_single_curve(
+                                    file_name, network, _get_params(file_name), p1, p1)
+                                self.plot_lines.append(line)
+                        elif mapping_mode == "一 一对应":
                             if len(port1_plot) != len(port2_plot):
                                 QMessageBox.warning(self, '输入错误', '一一对应模式需要端口数量相同！')
                                 return
@@ -1009,7 +1048,8 @@ class SParameterViewer_MainWin(QWidget):
 
     def on_port_select(self):
         try:
-            target_input = self.port2_input if self.port2_input.hasFocus() else self.port1_input
+            target_input = self.port1_input if self._is_tdr_plot_selected() else (
+                self.port2_input if self.port2_input.hasFocus() else self.port1_input)
             file_list = self.get_selected_file_keys()
             selected_ports = check_and_set_port_names(self, file_list)
             if selected_ports:

@@ -111,3 +111,38 @@ class TestComputeTimeDomainReturnsImpulse:
         result = compute_time_domain(self.ntwk, 1, 2, waveform=wf)
         assert "impulse_h_t" in result
         assert result["impulse_h_t"].size > 0
+
+    def test_channel_analyse_method_uses_requested_time_axis(self):
+        result = compute_time_domain(
+            self.ntwk, 1, 2, waveform="impulse",
+            dt_ps=2.0, n_points=512, method="channel_analyse")
+        assert result["method"] == "channel_analyse"
+        assert result["time_ps"].size == 512
+        assert result["time_ps"][1] - result["time_ps"][0] == pytest.approx(2.0)
+        assert result["dt_s"] == pytest.approx(2e-12)
+
+    def test_channel_analyse_method_avoids_constant_thru_tail_wrap(self):
+        result = compute_time_domain(
+            self.ntwk, 1, 2, waveform="impulse",
+            dt_ps=2.0, n_points=512, method="channel_analyse")
+        h = result["impulse_h_t"]
+        assert h[0] == pytest.approx(1.0)
+        assert np.max(np.abs(h[1:])) < 1e-12
+
+    def test_channel_analyse_method_places_integer_delay_on_time_axis(self):
+        delay_s = 100e-12
+        s = np.zeros_like(self.ntwk.s)
+        delayed = np.exp(-1j * 2.0 * np.pi * self.ntwk.f * delay_s)
+        s[:, 1, 0] = delayed
+        s[:, 0, 1] = delayed
+        ntwk = rf.Network(
+            frequency=self.ntwk.frequency, s=s, z0=50.0, name="delayed")
+
+        result = compute_time_domain(
+            ntwk, 1, 2, waveform="impulse",
+            dt_ps=2.0, n_points=512, method="channel_analyse")
+        h = result["impulse_h_t"]
+        peak_idx = int(np.argmax(np.abs(h)))
+        assert peak_idx == 50
+        assert result["time_ps"][peak_idx] == pytest.approx(100.0)
+        assert np.max(np.abs(h[-8:])) < 1e-10

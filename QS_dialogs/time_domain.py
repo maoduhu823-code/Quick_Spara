@@ -51,6 +51,7 @@ class TimeDomainDialog(QDialog):
         self._compat_timer.timeout.connect(self._update_compat)
 
         self._setup_ui()
+        self._on_waveform_changed(self._wf_btn_group.checkedButton())
         self._init_param_defaults()
 
     # ── UI 构建 ─────────────────────────────────────────────────────────────
@@ -148,6 +149,16 @@ class TimeDomainDialog(QDialog):
             "所有窗均以上升沿参数 tr 对应的带宽为截止频率。"
         )
         grid.addWidget(self._win_combo, 3, 1)
+
+        grid.addWidget(QLabel("计算方法:"), 4, 0)
+        self._method_combo = QComboBox()
+        self._method_combo.addItems(["现有算法", "参考脚本插值"])
+        self._method_combo.setToolTip(
+            "现有算法：沿用当前 DC 外推 + 频域窗 + irFFT。\n"
+            "参考脚本插值：按 t_step 和点数生成 rFFT 频轴，"
+            "将 S 参数幅度/相位插值到该频轴后直接 irFFT。"
+        )
+        grid.addWidget(self._method_combo, 4, 1)
 
         return grp
 
@@ -344,7 +355,11 @@ class TimeDomainDialog(QDialog):
             ports = check_and_set_port_names(
                 self, file_list, network_service=self._net_svc)
             if ports:
-                self._port2_edit.setText(" ".join(map(str, ports)))
+                text = " ".join(map(str, ports))
+                if self._current_waveform() == "TDR":
+                    self._port1_edit.setText(text)
+                else:
+                    self._port2_edit.setText(text)
         except Exception as e:
             show_error(self, f"选择端口时出错: {str(e)}")
 
@@ -355,22 +370,26 @@ class TimeDomainDialog(QDialog):
                 QMessageBox.warning(self, "提示", "请先在主窗口中选择 S 参数文件")
                 return
 
+            wf = self._current_waveform()
             p1_text = self._port1_edit.text().strip()
-            p2_text = self._port2_edit.text().strip()
+            p2_text = p1_text if wf == "TDR" else self._port2_edit.text().strip()
+            if wf == "TDR":
+                self._port2_edit.setText(p1_text)
             if not p1_text or not p2_text:
                 QMessageBox.warning(self, "提示", "请输入端口1和端口2")
                 return
 
             p1_list = parse_port_input(p1_text)
-            p2_list = parse_port_input(p2_text)
+            p2_list = p1_list if wf == "TDR" else parse_port_input(p2_text)
             if p1_list is None or p2_list is None:
                 return
 
-            wf = self._current_waveform()
             mode = self._map_combo.currentText()
 
             pairs = []
-            if mode == "一一对应":
+            if wf == "TDR":
+                pairs = [(p1, p1) for p1 in p1_list]
+            elif mode == "一一对应":
                 if len(p1_list) != len(p2_list):
                     QMessageBox.warning(self, "输入错误", "一一对应模式要求两个端口列表数量相同")
                     return
@@ -421,6 +440,7 @@ class TimeDomainDialog(QDialog):
             "Tukey": "tukey",   "Kaiser": "kaiser",
         }
         window_type = _WIN_MAP.get(self._win_combo.currentText(), "gaussian")
+        method = "channel_analyse" if self._method_combo.currentText() == "参考脚本插值" else "legacy"
 
         pw_ps = None
         if self._current_waveform() == "pulse":
@@ -480,7 +500,8 @@ class TimeDomainDialog(QDialog):
                     waveform=info["waveform"],
                     tr_ps=tr, dt_ps=dt, n_points=n,
                     z0=z0, pulse_width_ps=pw_ps,
-                    window_type=window_type, s_params=s_params
+                    window_type=window_type, method=method,
+                    s_params=s_params
                 )
 
                 x = result["time_ps"] / 1000 if unit == "ns" else result["time_ps"]
