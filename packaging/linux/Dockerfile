@@ -11,6 +11,8 @@ FROM quay.io/pypa/manylinux2014_x86_64
 # 如需更换 Python 版本，改下面这一行即可
 ENV PYBIN=/opt/python/cp311-cp311/bin
 ENV PATH=$PYBIN:$PATH
+# 锁定 qtpy 后端为 PyQt5（容器内根本没装 PyQt6，但显式声明更稳）
+ENV QT_API=pyqt5
 
 # 运行时依赖（PyQt5 wheel 已自带 Qt5 so，但仍需系统级 X / 字体库做最小链接）
 RUN yum install -y \

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QPushButton
+from qtpy.QtWidgets import QPushButton
 
 from QS_domain.display_config import FACET_OPTIONS
 

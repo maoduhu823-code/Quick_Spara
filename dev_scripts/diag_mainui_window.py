@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("SKRF_PLOT_ENV", "none")
 
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication
 from app_utils import configure_matplotlib
 
 app = QApplication.instance() or QApplication(sys.argv)

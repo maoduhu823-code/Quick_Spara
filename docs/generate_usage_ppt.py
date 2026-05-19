@@ -45,8 +45,8 @@ def ensure_paths() -> None:
 
 def _qt_app():
     """Create a QApplication using the native Windows platform for CJK fonts."""
-    from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtGui import QFont
+    from qtpy.QtWidgets import QApplication
+    from qtpy.QtGui import QFont
 
     os.environ.pop("QT_QPA_PLATFORM", None)
     app = QApplication.instance() or QApplication(sys.argv)
@@ -72,7 +72,7 @@ def grab_widget(widget, path: Path, app, size: tuple[int, int] | None = None) ->
 
 
 def capture_ui_screenshots() -> dict[str, Path]:
-    from PyQt6.QtWidgets import QListWidgetItem
+    from qtpy.QtWidgets import QListWidgetItem
 
     from main_window import SParameterViewer_MainWin
     from QS_dialogs.cascade import CascadeDialog

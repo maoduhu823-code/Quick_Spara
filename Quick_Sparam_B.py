@@ -1,9 +1,9 @@
 import sys
 import os
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtCore import QTimer
+from qtpy.QtGui import QIcon
+from qtpy.QtWidgets import QApplication
 
 os.environ.setdefault("SKRF_PLOT_ENV", "none")
 

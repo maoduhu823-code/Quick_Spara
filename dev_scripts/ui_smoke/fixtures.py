@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import skrf as rf
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QAbstractItemView
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QAbstractItemView
 
 from .harness import SmokeContext
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from itertools import product
 from typing import Iterable
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QAbstractButton,
     QCheckBox,
     QComboBox,

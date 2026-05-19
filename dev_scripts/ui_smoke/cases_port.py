@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QCheckBox, QDialogButtonBox
+from qtpy.QtWidgets import QCheckBox, QDialogButtonBox
 
 from .fixtures import ensure_viewer, first_network, selected_file_keys
 from .harness import SmokeContext

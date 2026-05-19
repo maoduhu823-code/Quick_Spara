@@ -1,9 +1,9 @@
 import numpy as np
-from PyQt6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout,
+from qtpy.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QHeaderView, QMessageBox, QApplication)
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont
+from qtpy.QtCore import Qt, QSize
+from qtpy.QtGui import QFont
 
 from app_utils import show_error, check_and_set_port_names
 from sparam_core import parse_port_input

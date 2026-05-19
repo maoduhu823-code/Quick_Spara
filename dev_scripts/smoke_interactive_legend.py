@@ -29,8 +29,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from PyQt6.QtWidgets import QApplication, QDialog
-from PyQt6.QtCore import QTimer
+from qtpy.QtWidgets import QApplication, QDialog
+from qtpy.QtCore import QTimer
 from matplotlib.backend_bases import KeyEvent, MouseEvent, PickEvent
 import matplotlib.pyplot as plt
 
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def fake_exec(self):
             # 找到所有 QLineEdit 子控件，按当前文本匹配预设值
-            from PyQt6.QtWidgets import QLineEdit
+            from qtpy.QtWidgets import QLineEdit
             for edit in self.findChildren(QLineEdit):
                 old = edit.text()
                 edits_seen.append(old)
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                f"legend.visible={legend.get_visible()}")
 
     def s8_toolbar_button():
-        from PyQt6.QtWidgets import QToolButton
+        from qtpy.QtWidgets import QToolButton
         toolbar = getattr(fig.canvas, "toolbar", None)
         if toolbar is None:
             mgr = getattr(fig.canvas, "manager", None)

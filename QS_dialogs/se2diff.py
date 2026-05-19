@@ -1,8 +1,8 @@
-from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QVBoxLayout,
+from qtpy.QtWidgets import (QDialog, QDialogButtonBox, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QRadioButton,
                              QGroupBox, QButtonGroup, QFrame, QMessageBox,
                              QSizePolicy)
-from PyQt6.QtGui import QPixmap
+from qtpy.QtGui import QPixmap
 
 from app_utils import resource_path, show_error
 from sparam_core import parse_port_input

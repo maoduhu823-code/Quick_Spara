@@ -1,7 +1,7 @@
 import os
 
 import numpy as np
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QTextEdit, QVBoxLayout,
 )

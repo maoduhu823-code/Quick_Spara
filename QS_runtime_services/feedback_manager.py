@@ -14,9 +14,9 @@ import socket
 import sys
 import uuid
 
-from PyQt6.QtCore import QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QPainter
-from PyQt6.QtWidgets import (
+from qtpy.QtCore import QRectF, Qt, Signal as pyqtSignal
+from qtpy.QtGui import QColor, QFont, QKeySequence, QPainter
+from qtpy.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog,
     QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton,

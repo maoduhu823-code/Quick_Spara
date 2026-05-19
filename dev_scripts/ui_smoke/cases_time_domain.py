@@ -4,7 +4,7 @@ from itertools import product
 
 from .fixtures import ensure_viewer, select_files
 from .harness import SmokeContext
-from PyQt6.QtWidgets import QPushButton
+from qtpy.QtWidgets import QPushButton
 
 from .widget_tools import button_inventory
 

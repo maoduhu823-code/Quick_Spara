@@ -108,8 +108,8 @@ def check_version_update_async(
     """后台检查新版本，避免共享路径访问拖慢主界面启动。"""
 
     try:
-        from PyQt6.QtCore import QTimer
-        from PyQt6.QtWidgets import QApplication
+        from qtpy.QtCore import QTimer
+        from qtpy.QtWidgets import QApplication
     except Exception:
         check_version_update(parent, show_dialog, timeout_seconds)
         return
@@ -339,8 +339,8 @@ def _show_update_dialog(
     location: str | None = None,
 ) -> None:
     try:
-        from PyQt6.QtCore import Qt
-        from PyQt6.QtWidgets import QApplication, QMessageBox
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QApplication, QMessageBox
 
         if location:
             text = f"{text}\n\n获取路径（文件资源管理器中打开）：\n{location}"

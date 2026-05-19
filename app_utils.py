@@ -2,7 +2,7 @@ import sys
 import os
 import traceback
 import numpy as np
-from PyQt6.QtWidgets import QMessageBox, QDialog, QApplication
+from qtpy.QtWidgets import QMessageBox, QDialog, QApplication
 
 
 # === 错误提示 ===
@@ -228,8 +228,8 @@ def attach_legend_toolbar_button(fig, legend, lines):
     与右键菜单功能一致再加一项整体切换；非 Qt 后端或没有工具栏时静默返回 None。
     """
     try:
-        from PyQt6.QtWidgets import QToolButton, QMenu
-        from PyQt6.QtCore import Qt
+        from qtpy.QtWidgets import QToolButton, QMenu
+        from qtpy.QtCore import Qt
     except ImportError:
         return None
     canvas = fig.canvas
@@ -280,8 +280,8 @@ def _legend_rename_map(legend, lines):
 def _show_legend_context_menu(legend, fig, event, rename_pairs):
     """右键 legend 区域时调用：弹 QMenu，两个动作。"""
     try:
-        from PyQt6.QtWidgets import QMenu
-        from PyQt6.QtCore import QPoint
+        from qtpy.QtWidgets import QMenu
+        from qtpy.QtCore import QPoint
     except ImportError:
         return
     app = QApplication.instance()
@@ -308,7 +308,7 @@ def apply_legend_batch_rename(rename_pairs, fig):
     rename_pairs: [(legtext_artist, original_line2d), ...]
     """
     try:
-        from PyQt6.QtWidgets import (
+        from qtpy.QtWidgets import (
             QDialog, QVBoxLayout, QFormLayout, QLineEdit,
             QDialogButtonBox, QLabel,
         )

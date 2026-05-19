@@ -3,14 +3,14 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QRadioButton, QButtonGroup, QLabel, QLineEdit,
     QPushButton, QCheckBox, QComboBox, QListWidget, QListWidgetItem,
     QMessageBox, QTextEdit, QApplication, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtGui import QFont
 
 from sparam_core import (compute_time_domain, td_default_params,
                          td_compat_check, parse_port_input)

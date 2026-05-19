@@ -5,14 +5,14 @@ import numpy as np
 import pandas as pd
 import re
 import os
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QListWidget, QLabel, QLineEdit, QMessageBox, QComboBox, QRadioButton,
     QGroupBox, QCheckBox, QGridLayout, QSpinBox, QTextEdit, QStackedWidget, QListWidgetItem, QProgressDialog,
     QSizePolicy
 )
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt
+from qtpy.QtGui import QPixmap
+from qtpy.QtCore import Qt
 import matplotlib.pyplot as plt
 from openpyxl.styles import Alignment
 import matplotlib

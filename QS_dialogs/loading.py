@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import (QDialog, QLabel, QVBoxLayout, QProgressBar,
+from qtpy.QtWidgets import (QDialog, QLabel, QVBoxLayout, QProgressBar,
                              QHBoxLayout, QPushButton)
-from PyQt6.QtCore import Qt, QPropertyAnimation
+from qtpy.QtCore import Qt, QPropertyAnimation
 
 
 class LoadingDialog(QDialog):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QComboBox
+from qtpy.QtWidgets import QComboBox
 
 from .fixtures import ensure_viewer, selected_file_keys
 from .harness import SmokeContext

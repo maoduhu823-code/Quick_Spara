@@ -419,7 +419,7 @@ def _expired_text(expire_at: datetime, state: dict[str, Any]) -> str:
 
 def _show_critical(parent: Any, title: str, text: str) -> None:
     try:
-        from PyQt6.QtWidgets import QMessageBox
+        from qtpy.QtWidgets import QMessageBox
 
         QMessageBox.critical(parent, title, text, QMessageBox.StandardButton.Ok)
     except Exception:

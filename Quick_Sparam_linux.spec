@@ -8,8 +8,12 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
-# PyQt5 子模块通常不需要全量收集；只在缺失时按需添加。
-hiddenimports = []
+# qtpy 是动态导入后端（由 QT_API 决定），PyInstaller 需要显式声明
+hiddenimports = [
+    'qtpy', 'qtpy.QtCore', 'qtpy.QtGui', 'qtpy.QtWidgets',
+    'PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets',
+    'PyQt5.sip',
+]
 
 a = Analysis(
     ['Quick_Sparam_B.py'],

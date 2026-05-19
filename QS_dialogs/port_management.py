@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
                               QPushButton, QTableWidget, QTableWidgetItem,
                               QLabel, QDialogButtonBox, QMessageBox)
-from PyQt6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 
 class PortManagementDialog(QDialog):

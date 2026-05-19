@@ -16,8 +16,8 @@ import sys
 import time
 from typing import Any
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QVBoxLayout, QWidget,
 )
@@ -448,7 +448,7 @@ def _format_duration(seconds: int) -> str:
 
 
 def _run_usage_survey_preview() -> int:
-    from PyQt6.QtWidgets import QApplication
+    from qtpy.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is None:

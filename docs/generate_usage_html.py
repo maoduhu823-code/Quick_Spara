@@ -487,8 +487,8 @@ def generate_charts() -> dict[str, Path]:
 # ---------------------------------------------------------------------------
 
 def capture_screenshots() -> dict[str, Path]:
-    from PyQt6.QtWidgets import QApplication, QListWidgetItem
-    from PyQt6.QtGui import QFont
+    from qtpy.QtWidgets import QApplication, QListWidgetItem
+    from qtpy.QtGui import QFont
 
     from main_window import SParameterViewer_MainWin
     from QS_dialogs.cascade import CascadeDialog
@@ -979,7 +979,7 @@ def build_html(screenshots: dict[str, Path], charts: dict[str, Path]) -> str:
         f"{render_ddr_workflow_html()}"
         f"{delivery}"
         '    <div class="footer">自动生成脚本：<code>docs/generate_usage_html.py</code>'
-        " &nbsp;&middot;&nbsp; 截图：PyQt6 widget.grab() &nbsp;&middot;&nbsp; 曲线图：matplotlib Agg</div>\n"
+        " &nbsp;&middot;&nbsp; 截图：qtpy widget.grab() &nbsp;&middot;&nbsp; 曲线图：matplotlib Agg</div>\n"
         "  </main>\n</div>\n</body>\n</html>"
     )
 

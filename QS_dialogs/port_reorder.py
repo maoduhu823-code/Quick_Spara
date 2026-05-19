@@ -1,7 +1,7 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QListWidget,
                              QAbstractItemView, QListWidgetItem)
-from PyQt6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 
 class PortOrderEditor(QDialog):

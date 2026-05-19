@@ -7,14 +7,14 @@ os.environ.setdefault("SKRF_PLOT_ENV", "none")
 
 import numpy as np
 import skrf as rf
-from PyQt6.QtGui import QTextCursor, QAction
-from PyQt6.QtWidgets import (
+from qtpy.QtGui import QTextCursor, QAction
+from qtpy.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QListWidget, QLabel, QLineEdit, QMessageBox,
     QComboBox, QGroupBox, QCheckBox, QGridLayout, QListWidgetItem,
     QTextEdit, QDialog, QInputDialog, QToolButton, QMenu
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from qtpy.QtCore import Qt, Signal as pyqtSignal
 
 from sparam_core import (enforce_nonzero_z0,
                          SE2diff, SE2dq_dqs, SE2diff_port, parse_port_input,

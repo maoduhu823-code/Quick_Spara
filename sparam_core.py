@@ -34,7 +34,7 @@ from QS_domain.algorithms.time_domain import (        # noqa: F401
 
 # === 端口字符串解析（含 UI 错误提示的包装层）===
 
-from PyQt6.QtWidgets import QMessageBox
+from qtpy.QtWidgets import QMessageBox
 
 
 def parse_port_input(input_str: str, type: str = 'port'):

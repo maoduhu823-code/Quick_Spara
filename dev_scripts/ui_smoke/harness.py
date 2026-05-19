@@ -10,7 +10,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Callable
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QApplication,
     QFileDialog,
     QDialog,

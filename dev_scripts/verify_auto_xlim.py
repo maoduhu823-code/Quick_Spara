@@ -32,7 +32,7 @@ OUT_DIR = os.path.join(os.path.dirname(__file__), "_out")
 
 
 def _setup_app():
-    from PyQt6.QtWidgets import QApplication
+    from qtpy.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv)
     from app_utils import configure_matplotlib
     configure_matplotlib()
