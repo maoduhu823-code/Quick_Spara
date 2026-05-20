@@ -132,7 +132,7 @@ def _exercise_info_buttons(ctx: SmokeContext, viewer) -> None:
         action.trigger()
         ctx.process_events()
         ctx.close_mpl_figures()
-    for text in ["清除缓存", "清除输出", "版本信息", "评价&反馈"]:
+    for text in ["清除缓存", "清除输出", "评价 | 需求反馈"]:
         button = find_button(viewer, text)
         if isinstance(button, QPushButton):
             button.click()

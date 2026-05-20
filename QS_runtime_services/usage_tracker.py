@@ -49,7 +49,8 @@ try:
     from .path_config import (
         DEVELOPER_RECORD_INBOX_DIRS_BY_PLATFORM,
         LOCAL_RECORD_INBOX_DIRS_BY_PLATFORM,
-        PROFILE_PATHS_BY_PLATFORM,
+        profile_local_path,
+        profile_remote_path,
     )
     from .record_writer import configured_paths, submit_record_async
 except ImportError:
@@ -82,7 +83,8 @@ except ImportError:
     from QS_runtime_services.path_config import (
         DEVELOPER_RECORD_INBOX_DIRS_BY_PLATFORM,
         LOCAL_RECORD_INBOX_DIRS_BY_PLATFORM,
-        PROFILE_PATHS_BY_PLATFORM,
+        profile_local_path,
+        profile_remote_path,
     )
     from QS_runtime_services.record_writer import configured_paths, submit_record_async
 
@@ -99,6 +101,8 @@ class UsageTracker:
         profile = _load_profile()
         if PROFILE_PROMPT_MODE != "every_start" and _profile_complete(profile):
             self._append_survey(profile)
+            # 本机已有完整 profile：分发模式下检查共享盘是否有同步副本，没有则推送。
+            _auto_sync_profile_to_remote(profile, parent=parent)
             return profile
 
         dialog = UsageSurveyDialog(parent, profile)
@@ -107,11 +111,15 @@ class UsageTracker:
             return profile
 
         profile = dialog.profile()
+        remote_failed = False
         try:
-            _save_profile(profile)
+            result = _save_profile(profile)
+            remote_failed = result.remote_attempted and not result.remote_succeeded
         except Exception as exc:
             print(f"提示：用户资料本地保存失败，下次启动可能继续提示填写。错误: {exc}")
         self._append_survey(profile)
+        if remote_failed:
+            _show_remote_sync_warning(parent)
         return profile
 
     def write_usage_log(self) -> None:
@@ -356,35 +364,103 @@ def get_usage_profile() -> dict[str, str]:
     return _load_profile()
 
 
+class _ProfileSaveResult:
+    """_save_profile 的返回值。本机模式下 remote_attempted=False。"""
+    __slots__ = ("local_path", "remote_attempted", "remote_succeeded", "remote_error")
+
+    def __init__(self) -> None:
+        self.local_path: Path | None = None
+        self.remote_attempted: bool = False
+        self.remote_succeeded: bool = False
+        self.remote_error: str = ""
+
+
 def _load_profile() -> dict[str, str]:
-    for path in _profile_paths():
-        if not path.exists():
-            continue
+    """只读本机 usage_profile.json。共享盘版本不参与判断"本地是否已填"，
+    避免别人在共享盘留下的资料污染本机首启动逻辑。"""
+    local = _local_profile_path()
+    if local.exists():
         try:
-            with path.open("r", encoding="utf-8") as f:
+            with local.open("r", encoding="utf-8") as f:
                 profile = json.load(f)
             base = _base_profile()
             base.update({k: str(v) for k, v in profile.items()})
             return base
         except Exception as exc:
-            print(f"提示：用户资料读取失败，已尝试下一个路径: {path}，错误: {exc}")
+            print(f"提示：本机用户资料读取失败：{local}，错误: {exc}")
     return _base_profile()
 
 
-def _save_profile(profile: dict[str, str]) -> None:
-    failures: list[tuple[Path, str]] = []
-    for path in _profile_paths():
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("w", encoding="utf-8") as f:
-                json.dump(profile, f, ensure_ascii=False, indent=2)
-            print(f"用户资料已保存到本地: {path}")
-            return
-        except Exception as exc:
-            failures.append((path, str(exc)))
+def _save_profile(profile: dict[str, str]) -> _ProfileSaveResult:
+    """先写本机（失败抛错，本机存档是硬要求），再尝试写远端（best effort）。"""
+    result = _ProfileSaveResult()
+    local = _local_profile_path()
+    try:
+        local.parent.mkdir(parents=True, exist_ok=True)
+        with local.open("w", encoding="utf-8") as f:
+            json.dump(profile, f, ensure_ascii=False, indent=2)
+        result.local_path = local
+        print(f"用户资料已保存到本机: {local}")
+    except Exception as exc:
+        raise RuntimeError(f"本机保存失败 {local}: {exc}")
 
-    details = "; ".join(f"{path}: {error}" for path, error in failures)
-    raise RuntimeError(details or "未配置用户资料本地保存路径")
+    remote = _remote_profile_path()
+    if remote is not None:
+        result.remote_attempted = True
+        try:
+            remote.parent.mkdir(parents=True, exist_ok=True)
+            with remote.open("w", encoding="utf-8") as f:
+                json.dump(profile, f, ensure_ascii=False, indent=2)
+            result.remote_succeeded = True
+            print(f"用户资料已同步到共享盘: {remote}")
+        except Exception as exc:
+            result.remote_error = str(exc)
+            print(f"提示：用户资料同步到共享盘失败：{exc}")
+    return result
+
+
+def _auto_sync_profile_to_remote(profile: dict[str, str], parent: Any = None) -> None:
+    """本机已有完整 profile，但远端没有 → 推送一次。失败时弹一次性警告。"""
+    remote = _remote_profile_path()
+    if remote is None:
+        return
+    if remote.exists():
+        return
+    try:
+        remote.parent.mkdir(parents=True, exist_ok=True)
+        with remote.open("w", encoding="utf-8") as f:
+            json.dump(profile, f, ensure_ascii=False, indent=2)
+        print(f"用户资料已同步到共享盘: {remote}")
+    except Exception as exc:
+        print(f"提示：用户资料同步到共享盘失败：{exc}")
+        _show_remote_sync_warning(parent)
+
+
+def _show_remote_sync_warning(parent: Any) -> None:
+    QMessageBox.warning(
+        parent,
+        "用户资料",
+        "用户资料已保存到本机，但无法自动发送到共享盘。\n"
+        "请联系管理员添加共享路径权限。",
+    )
+
+
+def _local_profile_path() -> Path:
+    raw = profile_local_path()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = _app_base_dir() / path
+    return path
+
+
+def _remote_profile_path() -> Path | None:
+    raw = profile_remote_path()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = _app_base_dir() / path
+    return path
 
 
 def _base_profile() -> dict[str, str]:
@@ -397,17 +473,6 @@ def _base_profile() -> dict[str, str]:
         "pl_group": "",
         "project_name": "",
     }
-
-
-def _profile_path() -> Path:
-    paths = _profile_paths()
-    if paths:
-        return paths[0]
-    return _app_base_dir() / "Public" / "usage_profile.json"
-
-
-def _profile_paths() -> list[Path]:
-    return configured_paths(PROFILE_PATHS_BY_PLATFORM, _app_base_dir())
 
 
 def _append_usage_record_async(

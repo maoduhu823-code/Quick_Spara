@@ -6,10 +6,18 @@ data_feedback/inbox/usage_用户名_时间戳_记录ID.json
 
 后续由 data_feedback_aggregator.py 定时汇总到 summary Excel，并在汇总成功后删除
 这些独立小文件。这样多人同时提交时只会创建不同文件，避免共享 Excel 文件锁。
+
+主备语义（2026-05 重构）：
+  - developer_inbox_dirs 是主目标（分发模式 = 共享盘；本机模式 = 空）。
+  - local_inbox_dirs 是兜底（分发模式 = 程序目录 ./Public/data_feedback/inbox/；本机
+    模式 = 程序目录 inbox 本身）。
+  - 写入策略：先写主目标；任何一个主路径成功即视为成功；全部主路径失败才写兜底。
+    本机模式 developer_inbox_dirs 为空，直接走兜底分支即可正确落地。
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import json
@@ -38,6 +46,15 @@ PATH_WRITE_TIMEOUT_SECONDS = 10
 RECORD_SCHEMA_VERSION = 1
 
 
+@dataclass
+class SubmissionResult:
+    """同步投递的结果，供 UI 决定要不要追加"无法自动发送"提示。"""
+    primary_succeeded: bool = True   # 主目标是否写入成功（无主目标时为 True）
+    fallback_used: bool = False      # 是否落到本机兜底
+    primary_errors: list[str] = field(default_factory=list)
+    written_paths: list[Path] = field(default_factory=list)
+
+
 def submit_record_async(
     record_name: str,
     sheet_name: str,
@@ -47,7 +64,7 @@ def submit_record_async(
     developer_inbox_dirs: list[Path],
     attachments: list[str | os.PathLike] | None = None,
 ) -> None:
-    """后台投递一条记录 JSON 到本地 inbox 和开发者 inbox。"""
+    """后台投递一条记录 JSON。主备语义，详见模块 docstring。"""
     worker = Thread(
         target=_submit_record_worker,
         args=(
@@ -63,6 +80,27 @@ def submit_record_async(
         name=f"{record_name}_record_writer",
     )
     worker.start()
+
+
+def submit_record_sync(
+    record_name: str,
+    sheet_name: str,
+    headers: list[str],
+    row: list[Any],
+    local_inbox_dirs: list[Path],
+    developer_inbox_dirs: list[Path],
+    attachments: list[str | os.PathLike] | None = None,
+) -> SubmissionResult:
+    """同步投递。返回 SubmissionResult 让调用方判断要不要给用户提示。"""
+    return _submit_record_worker(
+        record_name,
+        sheet_name,
+        headers,
+        row,
+        local_inbox_dirs,
+        developer_inbox_dirs,
+        list(attachments or []),
+    )
 
 
 def configured_paths(mapping: dict[str, Any], app_base_dir: Path) -> list[Path]:
@@ -89,7 +127,7 @@ def _submit_record_worker(
     local_inbox_dirs: list[Path],
     developer_inbox_dirs: list[Path],
     attachments: list[str | os.PathLike],
-) -> None:
+) -> SubmissionResult:
     payload = _build_payload(record_name, sheet_name, headers, row)
     attachment_entries = _build_attachment_entries(
         str(payload.get("record_id", "")), attachments
@@ -97,29 +135,36 @@ def _submit_record_worker(
     _apply_attachment_entries(payload, attachment_entries)
     prefix = _record_prefix(sheet_name)
 
-    local_written_dir = None
-    if local_inbox_dirs:
-        local_written_dir = _write_first_available_inbox(
-            record_name,
-            "本地",
-            payload,
-            _unique_paths(local_inbox_dirs),
-            prefix,
-            attachment_entries,
-        )
+    result = SubmissionResult()
+
+    # 主目标：developer_inbox_dirs（分发模式=共享，本机模式=空）。
+    developer_written_dir = None
     if developer_inbox_dirs:
-        developer_candidates = _unique_paths(developer_inbox_dirs, skip={local_written_dir})
-        if developer_candidates:
-            _write_first_available_inbox(
-                record_name,
-                "开发者",
-                payload,
-                developer_candidates,
-                prefix,
-                attachment_entries,
-            )
-    if not local_inbox_dirs and not developer_inbox_dirs:
+        developer_candidates = _unique_paths(developer_inbox_dirs)
+        developer_written_dir, errors = _write_first_available_inbox(
+            record_name, "开发者", payload, developer_candidates, prefix, attachment_entries,
+        )
+        result.primary_errors.extend(errors)
+        result.primary_succeeded = developer_written_dir is not None
+        if developer_written_dir is not None:
+            result.written_paths.append(developer_written_dir)
+
+    # 兜底：仅在主目标缺失或写失败时才写本机 inbox。
+    if developer_written_dir is None and local_inbox_dirs:
+        local_candidates = _unique_paths(local_inbox_dirs, skip={developer_written_dir})
+        local_written_dir, _ = _write_first_available_inbox(
+            record_name, "本地", payload, local_candidates, prefix, attachment_entries,
+        )
+        if local_written_dir is not None:
+            result.written_paths.append(local_written_dir)
+            # 只有"原本应该写主目标但失败了"才算用了兜底；本机模式 developer_inbox_dirs
+            # 为空，是正常路径，不算 fallback。
+            if developer_inbox_dirs:
+                result.fallback_used = True
+
+    if not result.written_paths:
         print_access_unavailable_once()
+    return result
 
 
 def _build_payload(
@@ -158,20 +203,23 @@ def _write_first_available_inbox(
     inbox_dirs: list[Path],
     prefix: str,
     attachment_entries: list[dict[str, Any]],
-) -> Path | None:
+) -> tuple[Path | None, list[str]]:
+    """返回 (写成功的目录, 写失败时累计的错误信息)。
+    inbox_dirs 为空时返回 (None, [])，由调用方决定是否继续走兜底路径。"""
+    errors: list[str] = []
     if not inbox_dirs:
-        print_access_unavailable_once()
-        return None
+        return None, errors
 
     for inbox_dir in inbox_dirs:
-        ok, _error = _write_payload_with_timeout(
+        ok, error = _write_payload_with_timeout(
             inbox_dir, payload, prefix, attachment_entries
         )
         if ok:
-            return inbox_dir
+            return inbox_dir, errors
+        if error:
+            errors.append(f"{inbox_dir}: {error}")
 
-    print_access_unavailable_once()
-    return None
+    return None, errors
 
 
 def _write_payload_with_timeout(

@@ -16,8 +16,10 @@
 ## 运行 / 打包
 
 ```bash
-python Quick_Sparam_B.py             # 完整版（空白启动）
-python Quick_Sparam_B.py --dev       # 调试预设（预填一组本机文件 + 端口）
-python Quick_Sparam_B.py --limited   # 精简版（关时域 + 跳过 usage profile）
-pyinstaller Quick_Sparam_install.spec  # 打包精简版 exe（runtime hook 注入 QS_LIMITED=1）
+# 测试版（源码 + PyCharm）
+python Quick_Sparam_B.py             # 空白启动，完整功能
+python Quick_Sparam_B.py --dev       # 预填一组本机调试文件 + 端口
+
+# 安装版
+pyinstaller Quick_Sparam_install.spec  # runtime hook 注入 QS_LIMITED=1 → 自动隐藏 S 参数操作区的"时域分析"对话框入口
 ```

@@ -28,7 +28,7 @@ from QS_services.plotting_service import compute_param_data
 from QS_runtime_services.trial_manager import check_trial_permission
 from QS_runtime_services.usage_tracker import UsageTracker
 from QS_runtime_services.feedback_manager import show_feedback_dialog
-from QS_runtime_services.version_manager import APP_VERSION, print_version_info
+from QS_runtime_services.version_manager import APP_VERSION
 from QS_dialogs.cascade import CascadeDialog
 from QS_dialogs.se2diff import DiffConversionDialog
 from QS_dialogs.port_reduction import PortReductionDialog
@@ -54,9 +54,10 @@ def _get_pyplot():
 class SParameterViewer_MainWin(QWidget):
     _append_output_signal = pyqtSignal(str)
 
-    def __init__(self, enable_time_domain=True):
+    def __init__(self, enable_time_domain=True, enable_td_dialog=True):
         super().__init__()
         self.enable_time_domain = enable_time_domain
+        self.enable_td_dialog = enable_td_dialog
         self.usage_tracker = UsageTracker()
         self._net_svc = NetworkService()
         self.initUI()
@@ -232,7 +233,7 @@ class SParameterViewer_MainWin(QWidget):
         sparam_ops_layout.addWidget(self.ripple_btn)
 
         self.td_analysis_btn = None
-        if self.enable_time_domain:
+        if self.enable_td_dialog:
             self.td_analysis_btn = QPushButton('时域分析')
             self.td_analysis_btn.setFixedHeight(32)
             self.td_analysis_btn.clicked.connect(self.call_time_domain_dialog)
@@ -249,7 +250,7 @@ class SParameterViewer_MainWin(QWidget):
         feedback_group = QGroupBox("信息反馈")
         feedback_layout = QVBoxLayout()
         feedback_layout.setSpacing(4)
-        self.feedback_button = QPushButton("评价&反馈")
+        self.feedback_button = QPushButton("评价 | 需求反馈")
         self.feedback_button.setFixedHeight(32)
         self.feedback_button.clicked.connect(self.open_feedback_dialog)
         feedback_layout.addWidget(self.feedback_button)
@@ -460,10 +461,6 @@ class SParameterViewer_MainWin(QWidget):
         save_button = QPushButton("保存输出")
         save_button.clicked.connect(self.save_output_to_file)
         output_button_layout.addWidget(save_button)
-        info_button = QPushButton("版本信息")
-        info_button.clicked.connect(self.info_version)
-        output_button_layout.addWidget(info_button)
-
         output_layout.addLayout(output_text_layout)
         output_layout.addLayout(output_button_layout)
         output_group.setLayout(output_layout)
@@ -500,7 +497,7 @@ class SParameterViewer_MainWin(QWidget):
         buttons = [self.open_button, self.save_button, self.diff_button,
                    self.port_management_button, self.cascade_button,
                    self.delete_button, self.analysis_btn, self.plot_button,
-                   self.ripple_btn, self.read_button]
+                   self.ripple_btn, self.read_button, self.topology_btn]
         if self.td_analysis_btn is not None:
             buttons.append(self.td_analysis_btn)
         for btn in buttons:
@@ -582,14 +579,11 @@ class SParameterViewer_MainWin(QWidget):
             except Exception:
                 show_error(self, "保存文件时出错")
 
-    def info_version(self):
-        print_version_info(self.version_num)
-
     def open_feedback_dialog(self):
         try:
             show_feedback_dialog(self)
         except Exception as e:
-            show_error(self, f"打开评价&反馈窗口出错: {str(e)}")
+            show_error(self, f"打开评价 | 需求反馈窗口出错: {str(e)}")
 
     def open_file_dialog(self):
         file_names, _ = QFileDialog.getOpenFileNames(
@@ -1568,7 +1562,7 @@ class SParameterViewer_MainWin(QWidget):
         dialog.show()
 
     def call_time_domain_dialog(self):
-        if not self.enable_time_domain:
+        if not self.enable_td_dialog:
             self._print_info(_TIME_DOMAIN_UNAVAILABLE_MESSAGE)
             return
         from QS_dialogs.time_domain import TimeDomainDialog

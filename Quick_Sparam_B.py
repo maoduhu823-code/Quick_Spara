@@ -7,10 +7,17 @@ from qtpy.QtWidgets import QApplication
 
 os.environ.setdefault("SKRF_PLOT_ENV", "none")
 
-# 旗标来源：命令行（--dev / --limited）或环境变量（QS_LIMITED=1）。
-# 打包后 PyInstaller 用 runtime hook 注入 QS_LIMITED=1 → 自动进入精简版。
+# 两种发行形态：
+#   测试版：源码 + PyCharm 跑，加 --dev 预填一组本机调试用例。
+#   安装版：PyInstaller 打包后的 exe，runtime hook 注入 QS_LIMITED=1 → 隐藏时域分析对话框入口。
 DEV_MODE = '--dev' in sys.argv
-LIMITED_MODE = ('--limited' in sys.argv) or (os.environ.get('QS_LIMITED') == '1')
+LIMITED_MODE = os.environ.get('QS_LIMITED') == '1'
+
+# --dev 强制进入本机路径模式，避免出差/借用机时被分发模式的共享盘配置劫持。
+# 必须在 path_config 的消费者（main_window / usage_tracker 等）import 之前调用。
+if DEV_MODE:
+    from QS_runtime_services.path_config import force_local_mode
+    force_local_mode(True)
 
 
 def _apply_dev_preset(viewer):
@@ -35,16 +42,17 @@ def main():
     if not check_trial_permission():
         sys.exit(1)
 
-    viewer = SParameterViewer_MainWin(enable_time_domain=not LIMITED_MODE)
+    viewer = SParameterViewer_MainWin(
+        enable_time_domain=True,
+        enable_td_dialog=not LIMITED_MODE,
+    )
     viewer.setWindowIcon(app_icon)
     if DEV_MODE:
         _apply_dev_preset(viewer)
     viewer.show()
-    viewer.info_version()
 
     def run_startup_followups():
-        if not LIMITED_MODE:
-            viewer.prompt_usage_profile()
+        viewer.prompt_usage_profile()
         check_version_update_async(parent=viewer)
 
     QTimer.singleShot(300, run_startup_followups)

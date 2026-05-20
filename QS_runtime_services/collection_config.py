@@ -53,8 +53,8 @@ USER_DATA_HEADERS = [
 USAGE_HEADERS = ["主机名", "启动时间", "关闭时间"]
 
 
-# ===== 评价&反馈问卷配置 =====
-FEEDBACK_WINDOW_TITLE = "评价&反馈"
+# ===== 评价 | 需求反馈问卷配置 =====
+FEEDBACK_WINDOW_TITLE = "评价 | 需求反馈"
 FEEDBACK_INTRO = "欢迎补充软件使用评价和后续需求，便于内部版本规划和优先级判断。"
 USAGE_INTENSITY_TITLE = "使用强度"
 POINT_EFFICIENCY_TITLE = "单点效率提高程度"

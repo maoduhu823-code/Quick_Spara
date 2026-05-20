@@ -145,7 +145,7 @@
     </figure>
     <figure>
       <img src="readme_assets/feedback_dialog_default.png" alt="评价与反馈界面">
-      <figcaption>主界面按钮打开评价&反馈，用于收集使用强度、效率提升和需求文本。</figcaption>
+      <figcaption>主界面按钮打开评价 | 需求反馈，用于收集使用强度、效率提升和需求文本。</figcaption>
     </figure>
   </div>
 
@@ -153,16 +153,17 @@
   <ul>
     <li>首次运行登记用户资料，并在本地保存 <code>Public/usage_profile.json</code>，避免重复弹窗。</li>
     <li>每次启动和关闭记录主机名、启动时间、关闭时间。</li>
-    <li>用户可主动提交评价&反馈。</li>
+    <li>用户可主动提交评价 | 需求反馈。</li>
     <li>运行时只写独立 JSON 小文件，避免多人直接写同一个 Excel 造成文件锁。</li>
     <li>开发者定时汇总 inbox，生成用户资料、使用记录、反馈三类 Excel 总表。</li>
   </ul>
 
   <h2>接入代码</h2>
-  <p>把 <code>runtime_services</code> 文件夹放到工程入口脚本同级，然后在主窗口中接入：</p>
-  <pre><code class="language-python">from PyQt6.QtWidgets import QPushButton, QWidget
+  <p>把 <code>QS_runtime_services</code> 文件夹放到工程入口脚本同级，然后在主窗口中接入。Qt 后端通过 <code>qtpy</code> 抽象层兼容 PyQt5 / PyQt6：</p>
+  <pre><code class="language-python">from qtpy.QtWidgets import QPushButton, QWidget
 
-from runtime_services.feedback_collection import UsageTracker, show_feedback_dialog
+from QS_runtime_services.feedback_manager import show_feedback_dialog
+from QS_runtime_services.usage_tracker import UsageTracker
 
 
 class MainWindow(QWidget):
@@ -170,7 +171,7 @@ class MainWindow(QWidget):
         super().__init__()
         self.usage_tracker = UsageTracker()
 
-        self.feedback_button = QPushButton("评价&amp;反馈")
+        self.feedback_button = QPushButton("评价 | 需求反馈")
         self.feedback_button.clicked.connect(self.open_feedback_dialog)
 
     def prompt_usage_profile(self):
@@ -184,7 +185,7 @@ class MainWindow(QWidget):
         super().closeEvent(event)</code></pre>
 
   <p>建议主界面显示后再弹首次用户资料问卷：</p>
-  <pre><code class="language-python">from PyQt6.QtCore import QTimer
+  <pre><code class="language-python">from qtpy.QtCore import QTimer
 
 window = MainWindow()
 window.show()
@@ -246,20 +247,20 @@ QTimer.singleShot(300, window.prompt_usage_profile)</code></pre>
       </tr>
       <tr>
         <td><code>data_feedback/inbox/feedback_*.json</code></td>
-        <td>评价&反馈记录。</td>
+        <td>评价 | 需求反馈记录。</td>
       </tr>
     </tbody>
   </table>
 
   <h2>汇总命令</h2>
   <pre><code class="language-bash"># 汇总开发者共享目录 inbox，一次性执行
-python -m runtime_services.data_feedback_aggregator --target developer --once
+python -m QS_runtime_services.data_feedback_aggregator --target developer --once
 
 # 每 10 分钟汇总一次
-python -m runtime_services.data_feedback_aggregator --target developer --interval-seconds 600
+python -m QS_runtime_services.data_feedback_aggregator --target developer --interval-seconds 600
 
 # 本机调试只汇总 .\Public\data_feedback\inbox
-python -m runtime_services.data_feedback_aggregator --target local --once</code></pre>
+python -m QS_runtime_services.data_feedback_aggregator --target local --once</code></pre>
 
   <p>汇总成功后会生成或续写：</p>
   <ul>
@@ -269,9 +270,9 @@ python -m runtime_services.data_feedback_aggregator --target local --once</code>
   </ul>
 
   <h2>本地测试</h2>
-  <pre><code class="language-bash">python -m runtime_services.usage_tracker
-python -m runtime_services.feedback_manager
-python -m runtime_services.data_feedback_aggregator_smoke_test</code></pre>
+  <pre><code class="language-bash">python -m QS_runtime_services.usage_tracker
+python -m QS_runtime_services.feedback_manager
+python -m QS_runtime_services.data_feedback_aggregator_smoke_test</code></pre>
 </main>
 </body>
 </html>

@@ -1,7 +1,7 @@
 """
 评价与反馈模块。
 
-本文件独立承载用户主动提交的评价&反馈问卷；用户身份登记和使用时长统计
+本文件独立承载用户主动提交的评价 | 需求反馈问卷；用户身份登记和使用时长统计
 继续由 usage_tracker.py 承载。
 """
 
@@ -53,7 +53,7 @@ try:
         DEVELOPER_RECORD_INBOX_DIRS_BY_PLATFORM,
         LOCAL_RECORD_INBOX_DIRS_BY_PLATFORM,
     )
-    from .record_writer import configured_paths, submit_record_async
+    from .record_writer import configured_paths, submit_record_sync
     from .usage_tracker import get_usage_profile
 except ImportError:
     ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -88,11 +88,11 @@ except ImportError:
         DEVELOPER_RECORD_INBOX_DIRS_BY_PLATFORM,
         LOCAL_RECORD_INBOX_DIRS_BY_PLATFORM,
     )
-    from QS_runtime_services.record_writer import configured_paths, submit_record_async
+    from QS_runtime_services.record_writer import configured_paths, submit_record_sync
     from QS_runtime_services.usage_tracker import get_usage_profile
 
 
-# 评价&反馈记录路径统一在 QS_runtime_services/path_config.py 中配置。
+# 评价 | 需求反馈记录路径统一在 QS_runtime_services/path_config.py 中配置。
 
 
 class StarRatingWidget(QWidget):
@@ -472,15 +472,15 @@ def show_feedback_dialog(parent: QWidget | None = None) -> None:
         return
 
     feedback = dialog.feedback()
-    append_feedback(feedback)
-    QMessageBox.information(
-        parent,
-        "提交成功",
-        "感谢反馈~我们会尽快处理，如需加急请直接welink联系开发者",
-    )
+    result = append_feedback(feedback)
+    message = "感谢反馈~我们会尽快处理，如需加急请直接welink联系开发者"
+    if not result.primary_succeeded:
+        message += "\n\n无法自动发送文件，请联系管理员添加共享路径权限。"
+    QMessageBox.information(parent, "提交成功", message)
 
 
-def append_feedback(feedback: dict[str, object]) -> None:
+def append_feedback(feedback: dict[str, object]):
+    """同步投递反馈记录。返回 SubmissionResult 让调用方决定要不要附加提醒文案。"""
     profile = get_usage_profile()
     attachments = _feedback_attachments(feedback)
     row = [
@@ -504,7 +504,7 @@ def append_feedback(feedback: dict[str, object]) -> None:
         _attachment_names(attachments),
         APP_VERSION,
     ]
-    submit_record_async(
+    return submit_record_sync(
         record_name="评价&反馈",
         sheet_name="评价反馈",
         headers=FEEDBACK_HEADERS,
@@ -555,10 +555,10 @@ def _run_feedback_preview() -> int:
 
     dialog = FeedbackDialog()
     if dialog.exec() == QDialog.DialogCode.Accepted:
-        print("评价&反馈测试提交结果：")
+        print("评价 | 需求反馈测试提交结果：")
         print(feedback_to_pretty_text(dialog.feedback()))
     else:
-        print("评价&反馈测试已取消。")
+        print("评价 | 需求反馈测试已取消。")
     return 0
 
 
